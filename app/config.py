@@ -45,6 +45,39 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
+    def assert_embedding_dimensions(self) -> None:
+        """
+        Probe the DB for the dimension of an existing embedding and compare to
+        settings.embedding_dimensions. A mismatch means the model changed after
+        chunks were indexed — similarity searches would silently return garbage.
+
+        Skipped when the chunks table is empty (fresh deployment or test env).
+        """
+        if self.vector_store_backend != "pgvector":
+            return
+        try:
+            from app.db import get_conn
+            with get_conn() as conn:
+                row = conn.execute(
+                    "SELECT vector_dims(embedding) FROM chunks LIMIT 1"
+                ).fetchone()
+            if row is None:
+                return  # empty table — nothing to compare
+            stored_dims = row[0]
+            if stored_dims != self.embedding_dimensions:
+                raise ValueError(
+                    f"Embedding dimension mismatch: DB has {stored_dims}-dim vectors "
+                    f"but EMBEDDING_DIMENSIONS={self.embedding_dimensions}. "
+                    "Run 'alembic downgrade base && alembic upgrade head' to re-create "
+                    "tables, then re-ingest all documents."
+                )
+        except Exception as exc:
+            # Don't crash on DB errors during startup probe — log and continue
+            import logging
+            logging.getLogger(__name__).warning(
+                "Embedding dimension check skipped: %s", exc
+            )
+
     def assert_production_ready(self) -> None:
         """Raise at startup if insecure defaults are present in non-local envs."""
         if self.app_env != "local":

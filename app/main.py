@@ -46,6 +46,7 @@ async def lifespan(app: FastAPI):
                 settings.db_pool_min_size, settings.db_pool_max_size)
     init_pool()
     logger.info("DB pool ready.")
+    settings.assert_embedding_dimensions()
 
     # Reap jobs that were stuck in 'processing' from a previous crash
     from app.db import get_conn

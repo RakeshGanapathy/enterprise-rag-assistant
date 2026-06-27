@@ -72,9 +72,6 @@ def ensure_cache_table(connection) -> None:
             hit_count      INTEGER DEFAULT 0
         )
     """)
-    connection.execute(
-        "ALTER TABLE query_cache ADD COLUMN IF NOT EXISTS context_hash TEXT"
-    )
     connection.execute("""
         CREATE INDEX IF NOT EXISTS query_cache_vec_idx
         ON query_cache
