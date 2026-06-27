@@ -396,7 +396,7 @@ def feedback_summary(claims: TokenClaims = Depends(require_auth)) -> dict:
 
 @app.get("/feedback/triage")
 def feedback_triage(
-    limit: int = Field(default=50, ge=1, le=500),
+    limit: int = Query(default=50, ge=1, le=500),
     claims: TokenClaims = Depends(require_auth),
 ) -> list[dict]:
     """List recent negative feedback for engineer review. Requires auth."""
@@ -459,7 +459,7 @@ def flush_cache_endpoint(
 
 @app.get("/debug/chunks")
 def debug_chunks(
-    limit: int = Field(default=20, ge=1, le=100),
+    limit: int = Query(default=20, ge=1, le=100),
     claims: TokenClaims = Depends(require_auth),
 ) -> list[dict]:
     """Inspect stored chunks. Requires auth. Disabled in production."""

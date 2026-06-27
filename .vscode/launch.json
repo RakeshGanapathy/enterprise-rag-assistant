@@ -1,0 +1,47 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "RAG API Server",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "uvicorn",
+      "args": ["app.main:app", "--port", "8000", "--reload", "--log-level", "info"],
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}"
+      },
+      "envFile": "${workspaceFolder}/.env",
+      "jinja": true,
+      "justMyCode": false
+    },
+    {
+      "name": "RAG API Server (no reload)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "uvicorn",
+      "args": ["app.main:app", "--port", "8000", "--log-level", "debug"],
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}"
+      },
+      "envFile": "${workspaceFolder}/.env",
+      "jinja": true,
+      "justMyCode": false
+    },
+    {
+      "name": "Run Unit Tests",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "pytest",
+      "args": ["tests/", "-v", "--tb=short"],
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}"
+      },
+      "envFile": "${workspaceFolder}/.env",
+      "jinja": true,
+      "justMyCode": false
+    }
+  ]
+}

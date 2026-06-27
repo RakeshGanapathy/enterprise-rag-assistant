@@ -375,16 +375,16 @@ def _build_pgvector_where(f: AccessFilter | None) -> tuple[str, tuple]:
     if "all" in f.departments:
         # Dept unrestricted — only filter by access level
         return (
-            "WHERE (metadata_json->>'access_level') IN %s",
-            (_allowed_level_labels(f.max_access_level),),
+            "WHERE (metadata_json->>'access_level') = ANY(%s)",
+            (list(_allowed_level_labels(f.max_access_level)),),
         )
 
     return (
-        "WHERE metadata_json->>'department' IN %s "
-        "AND (metadata_json->>'access_level') IN %s",
+        "WHERE metadata_json->>'department' = ANY(%s) "
+        "AND (metadata_json->>'access_level') = ANY(%s)",
         (
-            tuple(f.departments),
-            _allowed_level_labels(f.max_access_level),
+            list(f.departments),
+            list(_allowed_level_labels(f.max_access_level)),
         ),
     )
 
