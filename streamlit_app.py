@@ -299,31 +299,67 @@ with tab_ask:
 
     if user_input:
         st.session_state.chat_messages.append({'role': 'user', 'content': user_input})
+
+        payload = {'question': user_input, 'top_k': 4}
+        if st.session_state.conversation_id:
+            payload['conversation_id'] = st.session_state.conversation_id
+
         try:
-            with st.spinner('Searching and generating answer...'):
-                payload = {'question': user_input, 'top_k': 4}
-                if st.session_state.conversation_id:
-                    payload['conversation_id'] = st.session_state.conversation_id
+            with st.chat_message('assistant'):
+                status = st.empty()
+                answer_box = st.empty()
+                answer_tokens = []
+                sources = []
+                cached = False
 
-                r = requests.post(
-                    f'{API_BASE}/ask',
+                with requests.post(
+                    f'{API_BASE}/ask/stream',
                     json=payload,
-                    headers=_auth_headers(),
+                    headers={**_auth_headers(), 'Accept': 'text/event-stream'},
+                    stream=True,
                     timeout=120,
-                )
-                r.raise_for_status()
-                data = r.json()
+                ) as r:
+                    r.raise_for_status()
+                    for raw_line in r.iter_lines():
+                        if not raw_line:
+                            continue
+                        line = raw_line.decode('utf-8') if isinstance(raw_line, bytes) else raw_line
+                        if not line.startswith('data:'):
+                            continue
+                        event = json.loads(line[5:].strip())
+                        etype = event.get('type')
 
-                if data.get('conversation_id'):
-                    st.session_state.conversation_id = data['conversation_id']
+                        if etype == 'step':
+                            status.caption(f"_{event.get('text', '')}_")
+                        elif etype == 'token':
+                            answer_tokens.append(event.get('text', ''))
+                            answer_box.markdown(''.join(answer_tokens))
+                        elif etype == 'done':
+                            status.empty()
+                            sources = event.get('sources', [])
+                            cached = event.get('cached', False)
+                            conv_id = event.get('conversation_id')
+                            if conv_id:
+                                st.session_state.conversation_id = conv_id
+                        elif etype == 'error':
+                            st.error(event.get('text', 'Unknown error'))
+
+                full_answer = ''.join(answer_tokens)
+                if cached:
+                    st.caption('(served from cache)')
+                if sources:
+                    with st.expander('Sources'):
+                        for s in sources:
+                            relevance = f" ({s.get('score', 0)*100:.0f}%)" if s.get('score') else ""
+                            st.write(f"**{s.get('source','?')}{relevance}**")
 
                 st.session_state.chat_messages.append({
                     'role': 'assistant',
-                    'content': data.get('answer', 'No answer generated'),
-                    'sources': data.get('sources', []),
-                    'cached': data.get('cached', False),
+                    'content': full_answer or 'No answer generated',
+                    'sources': sources,
+                    'cached': cached,
                 })
-                st.rerun()
+
         except Exception as e:
             st.error(f'Error: {e}')
 
