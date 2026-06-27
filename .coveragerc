@@ -1,0 +1,54 @@
+[coverage:run]
+omit =
+    # Requires live PostgreSQL
+    app/db.py
+    app/conversation/store.py
+    app/cache/query_cache.py
+    app/feedback/store.py
+    app/ingestion/document_store.py
+    app/auth/rate_limit.py
+
+    # Requires OpenAI API
+    app/llm.py
+    app/graph/*
+    app/retrieval/qa.py
+    app/retrieval/streaming.py
+    app/retrieval/reranker.py
+    app/evaluation/*
+
+    # Requires full app stack (FastAPI + DB + OpenAI)
+    app/main.py
+    app/middleware.py
+    app/tracing.py
+
+    # Requires file system + DB
+    app/ingestion/pipeline.py
+    app/ingestion/loaders.py
+    app/ingestion/chunking.py
+
+    # Requires JWT request context
+    app/auth/dependencies.py
+    app/auth/jwt.py
+
+[coverage:report]
+omit =
+    app/db.py
+    app/conversation/store.py
+    app/cache/query_cache.py
+    app/feedback/store.py
+    app/ingestion/document_store.py
+    app/auth/rate_limit.py
+    app/llm.py
+    app/graph/*
+    app/retrieval/qa.py
+    app/retrieval/streaming.py
+    app/retrieval/reranker.py
+    app/evaluation/*
+    app/main.py
+    app/middleware.py
+    app/tracing.py
+    app/ingestion/pipeline.py
+    app/ingestion/loaders.py
+    app/ingestion/chunking.py
+    app/auth/dependencies.py
+    app/auth/jwt.py

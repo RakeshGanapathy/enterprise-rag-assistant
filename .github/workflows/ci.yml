@@ -48,7 +48,7 @@ jobs:
           PYTHONPATH=${{ github.workspace }} pytest tests/ \
             --cov=app \
             --cov-report=term-missing \
-            --cov-fail-under=15 \
+            --cov-fail-under=60 \
             -v \
             --tb=short
 
