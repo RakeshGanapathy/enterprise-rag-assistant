@@ -258,7 +258,7 @@ with tab_ask:
         if st.session_state.conversation_id:
             st.caption(f'Conversation ID: `{st.session_state.conversation_id}`')
 
-    # Sample question buttons
+    # Sample question shortcut buttons
     col_s1, col_s2, col_s3 = st.columns(3)
     sample_questions = [
         "What is the PTO policy?",
@@ -273,45 +273,47 @@ with tab_ask:
 
     st.markdown('---')
 
-    # Chat history
+    # ── 1. Render existing history ─────────────────────────────────────────
     for msg in st.session_state.chat_messages:
-        if msg['role'] == 'user':
-            with st.chat_message('user'):
-                st.write(msg['content'])
-        else:
-            with st.chat_message('assistant'):
-                st.write(msg['content'])
-                if msg.get('cached'):
-                    st.caption('(served from cache)')
-                if msg.get('sources'):
-                    with st.expander('Sources'):
-                        for s in msg['sources']:
-                            relevance = f" ({s.get('score', 0)*100:.0f}%)" if s.get('score') else ""
-                            st.write(f"**{s.get('source','?')}{relevance}**")
+        with st.chat_message(msg['role']):
+            st.markdown(msg['content'])
+            if msg.get('cached'):
+                st.caption('(served from cache)')
+            if msg.get('sources'):
+                with st.expander('Sources'):
+                    for s in msg['sources']:
+                        relevance = f" ({s.get('score', 0)*100:.0f}%)" if s.get('score') else ""
+                        st.write(f"**{s.get('source','?')}{relevance}**")
 
-    st.markdown('---')
+    # ── 2. Chat input (Streamlit pins this to bottom visually) ────────────
     user_input = st.chat_input('Ask something about the documents...')
 
-    # Sample question buttons fire a rerun with pending_question set
+    # Sample buttons set pending_question; resolve it here
     if st.session_state.pending_question:
         user_input = st.session_state.pending_question
         st.session_state.pending_question = None
 
+    # ── 3. Handle new question ────────────────────────────────────────────
     if user_input:
+        # Show user bubble immediately (inline, after history)
+        with st.chat_message('user'):
+            st.markdown(user_input)
+        # Save to state
         st.session_state.chat_messages.append({'role': 'user', 'content': user_input})
 
         payload = {'question': user_input, 'top_k': 4}
         if st.session_state.conversation_id:
             payload['conversation_id'] = st.session_state.conversation_id
 
-        try:
-            with st.chat_message('assistant'):
-                status = st.empty()
-                answer_box = st.empty()
-                answer_tokens = []
-                sources = []
-                cached = False
+        # Stream assistant response inline (no rerun — avoids duplicate render)
+        with st.chat_message('assistant'):
+            status_ph = st.empty()
+            answer_ph = st.empty()
+            answer_tokens: list[str] = []
+            sources: list = []
+            cached = False
 
+            try:
                 with requests.post(
                     f'{API_BASE}/ask/stream',
                     json=payload,
@@ -330,38 +332,40 @@ with tab_ask:
                         etype = event.get('type')
 
                         if etype == 'step':
-                            status.caption(f"_{event.get('text', '')}_")
+                            status_ph.caption(f"_{event.get('text', '')}_")
                         elif etype == 'token':
                             answer_tokens.append(event.get('text', ''))
-                            answer_box.markdown(''.join(answer_tokens))
+                            answer_ph.markdown(''.join(answer_tokens))
                         elif etype == 'done':
-                            status.empty()
+                            status_ph.empty()
                             sources = event.get('sources', [])
                             cached = event.get('cached', False)
-                            conv_id = event.get('conversation_id')
-                            if conv_id:
-                                st.session_state.conversation_id = conv_id
+                            if event.get('conversation_id'):
+                                st.session_state.conversation_id = event['conversation_id']
                         elif etype == 'error':
                             st.error(event.get('text', 'Unknown error'))
 
-                full_answer = ''.join(answer_tokens)
-                if cached:
-                    st.caption('(served from cache)')
-                if sources:
-                    with st.expander('Sources'):
-                        for s in sources:
-                            relevance = f" ({s.get('score', 0)*100:.0f}%)" if s.get('score') else ""
-                            st.write(f"**{s.get('source','?')}{relevance}**")
+            except Exception as e:
+                st.error(f'Error: {e}')
 
-                st.session_state.chat_messages.append({
-                    'role': 'assistant',
-                    'content': full_answer or 'No answer generated',
-                    'sources': sources,
-                    'cached': cached,
-                })
+            full_answer = ''.join(answer_tokens) or 'No answer generated'
+            answer_ph.markdown(full_answer)
 
-        except Exception as e:
-            st.error(f'Error: {e}')
+            if cached:
+                st.caption('(served from cache)')
+            if sources:
+                with st.expander('Sources'):
+                    for s in sources:
+                        relevance = f" ({s.get('score', 0)*100:.0f}%)" if s.get('score') else ""
+                        st.write(f"**{s.get('source','?')}{relevance}**")
+
+            # Persist to session state — next render will show from history
+            st.session_state.chat_messages.append({
+                'role': 'assistant',
+                'content': full_answer,
+                'sources': sources,
+                'cached': cached,
+            })
 
 
 # ============================================================================
