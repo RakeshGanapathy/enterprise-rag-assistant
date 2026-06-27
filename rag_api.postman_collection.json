@@ -1,0 +1,280 @@
+{
+  "info": {
+    "name": "Enterprise RAG Knowledge Assistant",
+    "description": "Complete API collection for the RAG system. Set the `TOKEN` variable before running auth-required requests.\n\nSetup:\n1. Generate a token using the 'Generate JWT Token (Python)' instructions\n2. Set the collection variable `TOKEN` to that value\n3. Run requests in order: health → ingest → ask",
+    "_postman_id": "rag-api-v1",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "BASE_URL", "value": "http://localhost:8000", "type": "string" },
+    { "key": "TOKEN",    "value": "PASTE_YOUR_JWT_HERE",  "type": "string" }
+  ],
+  "item": [
+    {
+      "name": "1. Health",
+      "item": [
+        {
+          "name": "GET /health",
+          "request": {
+            "method": "GET",
+            "url": "{{BASE_URL}}/health",
+            "description": "Check server, DB, and env status. No auth required."
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Documents",
+      "item": [
+        {
+          "name": "POST /documents/upload (hr_policy)",
+          "request": {
+            "method": "POST",
+            "url": "{{BASE_URL}}/documents/upload",
+            "header": [{ "key": "Authorization", "value": "Bearer {{TOKEN}}" }],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": "data/sample_docs/hr_policy.md",
+                  "description": "Select file manually in Postman"
+                }
+              ]
+            },
+            "description": "Upload a document for indexing. Returns a job_id to poll status."
+          }
+        },
+        {
+          "name": "GET /documents/status/:job_id",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{BASE_URL}}/documents/status/REPLACE_WITH_JOB_ID",
+              "host": ["{{BASE_URL}}"],
+              "path": ["documents", "status", "REPLACE_WITH_JOB_ID"]
+            },
+            "description": "Poll job status. Status values: queued → processing → done / failed"
+          }
+        },
+        {
+          "name": "POST /documents/ingest-samples",
+          "request": {
+            "method": "POST",
+            "url": "{{BASE_URL}}/documents/ingest-samples",
+            "header": [{ "key": "Authorization", "value": "Bearer {{TOKEN}}" }],
+            "description": "Ingest all files in data/sample_docs/. Skips unchanged files."
+          }
+        },
+        {
+          "name": "POST /documents/sync",
+          "request": {
+            "method": "POST",
+            "url": "{{BASE_URL}}/documents/sync",
+            "header": [{ "key": "Authorization", "value": "Bearer {{TOKEN}}" }],
+            "description": "Re-scan docs folder for changes and re-index modified files."
+          }
+        },
+        {
+          "name": "GET /documents",
+          "request": {
+            "method": "GET",
+            "url": "{{BASE_URL}}/documents",
+            "header": [{ "key": "Authorization", "value": "Bearer {{TOKEN}}" }],
+            "description": "List all indexed documents with metadata."
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Search & Ask",
+      "item": [
+        {
+          "name": "POST /search",
+          "request": {
+            "method": "POST",
+            "url": "{{BASE_URL}}/search",
+            "header": [
+              { "key": "Authorization",  "value": "Bearer {{TOKEN}}" },
+              { "key": "Content-Type",   "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"question\": \"What is the PTO policy?\"\n}"
+            },
+            "description": "Hybrid semantic+BM25 search. Returns top-k chunks."
+          }
+        },
+        {
+          "name": "POST /ask",
+          "request": {
+            "method": "POST",
+            "url": "{{BASE_URL}}/ask",
+            "header": [
+              { "key": "Authorization",  "value": "Bearer {{TOKEN}}" },
+              { "key": "Content-Type",   "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"question\": \"What is the PTO policy and how many vacation days do employees get?\",\n  \"search_mode\": \"auto\",\n  \"top_k\": 4\n}"
+            },
+            "description": "Full RAG: retrieval + LLM answer. Checks cache on second call."
+          }
+        },
+        {
+          "name": "POST /ask (cache hit - same question)",
+          "request": {
+            "method": "POST",
+            "url": "{{BASE_URL}}/ask",
+            "header": [
+              { "key": "Authorization",  "value": "Bearer {{TOKEN}}" },
+              { "key": "Content-Type",   "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"question\": \"What is the PTO policy and how many vacation days do employees get?\",\n  \"search_mode\": \"auto\",\n  \"top_k\": 4\n}"
+            },
+            "description": "Run the same question again — response should show cached: true"
+          }
+        },
+        {
+          "name": "POST /ask/stream",
+          "request": {
+            "method": "POST",
+            "url": "{{BASE_URL}}/ask/stream",
+            "header": [
+              { "key": "Authorization",  "value": "Bearer {{TOKEN}}" },
+              { "key": "Content-Type",   "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"question\": \"Explain the incident response procedure step by step\"\n}"
+            },
+            "description": "Streaming SSE response. Open in browser or use curl --no-buffer."
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. Conversations",
+      "item": [
+        {
+          "name": "POST /conversations",
+          "request": {
+            "method": "POST",
+            "url": "{{BASE_URL}}/conversations",
+            "header": [
+              { "key": "Authorization",  "value": "Bearer {{TOKEN}}" },
+              { "key": "Content-Type",   "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"question\": \"What is the security policy?\"\n}"
+            },
+            "description": "Start a new conversation. Returns conversation_id."
+          }
+        },
+        {
+          "name": "GET /conversations/:id",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{BASE_URL}}/conversations/REPLACE_WITH_CONV_ID",
+              "host": ["{{BASE_URL}}"],
+              "path": ["conversations", "REPLACE_WITH_CONV_ID"]
+            },
+            "header": [{ "key": "Authorization", "value": "Bearer {{TOKEN}}" }],
+            "description": "Get conversation history. Returns 403 if you don't own it."
+          }
+        }
+      ]
+    },
+    {
+      "name": "5. Feedback",
+      "item": [
+        {
+          "name": "POST /feedback",
+          "request": {
+            "method": "POST",
+            "url": "{{BASE_URL}}/feedback",
+            "header": [
+              { "key": "Authorization",  "value": "Bearer {{TOKEN}}" },
+              { "key": "Content-Type",   "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"question\": \"What is the PTO policy?\",\n  \"answer\": \"Employees get 20 days PTO.\",\n  \"rating\": 1,\n  \"comment\": \"Very helpful!\"\n}"
+            },
+            "description": "Submit thumbs-up (rating=1) or thumbs-down (rating=-1) feedback."
+          }
+        },
+        {
+          "name": "GET /feedback/summary",
+          "request": {
+            "method": "GET",
+            "url": "{{BASE_URL}}/feedback/summary",
+            "header": [{ "key": "Authorization", "value": "Bearer {{TOKEN}}" }],
+            "description": "Aggregated feedback stats. Admin only."
+          }
+        },
+        {
+          "name": "GET /feedback/triage",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{BASE_URL}}/feedback/triage?limit=20",
+              "host": ["{{BASE_URL}}"],
+              "path": ["feedback", "triage"],
+              "query": [{ "key": "limit", "value": "20" }]
+            },
+            "header": [{ "key": "Authorization", "value": "Bearer {{TOKEN}}" }],
+            "description": "List recent negative feedback for engineer review."
+          }
+        }
+      ]
+    },
+    {
+      "name": "6. Cache",
+      "item": [
+        {
+          "name": "GET /cache/stats",
+          "request": {
+            "method": "GET",
+            "url": "{{BASE_URL}}/cache/stats",
+            "header": [{ "key": "Authorization", "value": "Bearer {{TOKEN}}" }],
+            "description": "Cache hit/miss counts and size."
+          }
+        },
+        {
+          "name": "DELETE /cache",
+          "request": {
+            "method": "DELETE",
+            "url": "{{BASE_URL}}/cache",
+            "header": [{ "key": "Authorization", "value": "Bearer {{TOKEN}}" }],
+            "description": "Flush the entire query cache."
+          }
+        }
+      ]
+    },
+    {
+      "name": "7. Debug (local/dev only)",
+      "item": [
+        {
+          "name": "GET /debug/chunks",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{BASE_URL}}/debug/chunks?limit=10",
+              "host": ["{{BASE_URL}}"],
+              "path": ["debug", "chunks"],
+              "query": [{ "key": "limit", "value": "10" }]
+            },
+            "header": [{ "key": "Authorization", "value": "Bearer {{TOKEN}}" }],
+            "description": "Inspect stored chunks in the vector DB. Returns 404 in production."
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,62 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Start pgvector (Docker)",
+      "type": "shell",
+      "command": "docker run -d --name pgvector-rag -e POSTGRES_USER=rag -e POSTGRES_PASSWORD=rag -e POSTGRES_DB=rag -p 5433:5432 pgvector/pgvector:pg16 || docker start pgvector-rag",
+      "group": "build",
+      "presentation": { "reveal": "always", "panel": "new" },
+      "problemMatcher": []
+    },
+    {
+      "label": "Run Alembic Migrations",
+      "type": "shell",
+      "command": ".venv/Scripts/alembic upgrade head",
+      "options": { "cwd": "${workspaceFolder}" },
+      "group": "build",
+      "presentation": { "reveal": "always", "panel": "shared" },
+      "problemMatcher": [],
+      "dependsOn": "Start pgvector (Docker)"
+    },
+    {
+      "label": "Start RAG Server",
+      "type": "shell",
+      "command": ".venv/Scripts/uvicorn app.main:app --port 8000 --reload --log-level info",
+      "options": {
+        "cwd": "${workspaceFolder}",
+        "env": { "PYTHONPATH": "${workspaceFolder}" }
+      },
+      "group": { "kind": "build", "isDefault": true },
+      "isBackground": true,
+      "presentation": { "reveal": "always", "panel": "dedicated" },
+      "problemMatcher": {
+        "pattern": { "regexp": "." },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": "Started server",
+          "endsPattern": "Application startup complete"
+        }
+      }
+    },
+    {
+      "label": "Run Tests",
+      "type": "shell",
+      "command": ".venv/Scripts/pytest tests/ -v --tb=short",
+      "options": {
+        "cwd": "${workspaceFolder}",
+        "env": { "PYTHONPATH": "${workspaceFolder}" }
+      },
+      "group": { "kind": "test", "isDefault": true },
+      "presentation": { "reveal": "always", "panel": "shared" },
+      "problemMatcher": []
+    },
+    {
+      "label": "Full Setup (Docker + Migrate + Server)",
+      "dependsOn": ["Start pgvector (Docker)", "Run Alembic Migrations", "Start RAG Server"],
+      "dependsOrder": "sequence",
+      "group": "build",
+      "problemMatcher": []
+    }
+  ]
+}

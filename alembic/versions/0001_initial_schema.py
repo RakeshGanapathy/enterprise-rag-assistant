@@ -72,15 +72,14 @@ def upgrade() -> None:
 
     op.execute("""
         CREATE TABLE IF NOT EXISTS query_cache (
-            cache_key     TEXT PRIMARY KEY,
-            question      TEXT NOT NULL,
-            answer        TEXT NOT NULL,
-            sources       JSONB NOT NULL DEFAULT '[]',
-            context_hash  TEXT,
-            embedding     vector(1536),
-            hit_count     INTEGER DEFAULT 0,
-            created_at    TIMESTAMPTZ DEFAULT NOW(),
-            expires_at    TIMESTAMPTZ NOT NULL
+            question_hash  TEXT PRIMARY KEY,
+            question_text  TEXT NOT NULL,
+            context_hash   TEXT,
+            question_vec   vector(1536),
+            answer_json    JSONB NOT NULL,
+            search_mode    TEXT NOT NULL DEFAULT 'hybrid',
+            created_at     TIMESTAMPTZ DEFAULT NOW(),
+            expires_at     TIMESTAMPTZ NOT NULL
         )
     """)
     op.execute("""
@@ -88,9 +87,9 @@ def upgrade() -> None:
         ON query_cache (expires_at)
     """)
     op.execute("""
-        CREATE INDEX IF NOT EXISTS query_cache_embedding_idx
-        ON query_cache USING hnsw (embedding vector_cosine_ops)
-        WHERE embedding IS NOT NULL
+        CREATE INDEX IF NOT EXISTS query_cache_vec_idx
+        ON query_cache USING hnsw (question_vec vector_cosine_ops)
+        WHERE question_vec IS NOT NULL
     """)
 
     op.execute("""
@@ -109,10 +108,10 @@ def upgrade() -> None:
 
     op.execute("""
         CREATE TABLE IF NOT EXISTS rate_limit_counters (
-            user_id        TEXT NOT NULL,
+            subject        TEXT NOT NULL,
             window_key     BIGINT NOT NULL,
             request_count  INTEGER NOT NULL DEFAULT 1,
-            PRIMARY KEY (user_id, window_key)
+            PRIMARY KEY (subject, window_key)
         )
     """)
 
