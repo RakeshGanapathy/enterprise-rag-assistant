@@ -30,8 +30,9 @@ data/processed/
 # Evaluation reports (generated, can be large)
 tests/eval_reports/
 
-# Interview prep notes (personal)
+# Personal notes (local only)
 prep.md
+prep_learning_roadmap.md
 
 # Langfuse self-hosted (separate repo — run via docker compose separately)
 langfuse/

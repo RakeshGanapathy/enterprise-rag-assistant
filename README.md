@@ -534,35 +534,3 @@ tests/
 └── run_evaluation.py        CLI evaluation script
 ```
 
----
-
-## Interview Summary
-
-This project implements a production-oriented enterprise RAG assistant with:
-
-- Document ingestion for `.txt`, `.md`, `.pdf`, `.docx` with table extraction (pdfplumber + python-docx)
-- pgvector as the vector database with HNSW indexing and JSONB metadata filtering
-- Hybrid retrieval: BM25 keyword search and dense vector search running in parallel via ThreadPoolExecutor
-- Reciprocal Rank Fusion merging both ranked lists
-- Cross-encoder reranker (local or Cohere) for precision over the candidate pool
-- Deterministic query router classifying each query before any DB call
-- Role-based access control filtering inside pgvector WHERE clause before the HNSW scan
-- LangGraph stateful workflow: retrieve → grade → rewrite → generate → ground
-- JWT authentication — domain and actions claims map directly to RBAC AccessFilter
-- S3 + Lambda event-driven ingestion with mtime→hash two-tier change detection
-- Semantic answer cache keyed on retrieved chunk IDs — shared across roles when chunks are identical
-- Multi-turn conversation history with 6-turn context window
-- User feedback with auto-triage into retrieval vs generation failure modes
-- Rate limiting: fixed-window counter per JWT subject in pgvector
-- RAGAS evaluation framework on 12 golden questions
-- Langfuse tracing on every span
-
-Resume bullet:
-
-```
-Built a production enterprise RAG assistant (FastAPI + LangGraph + pgvector) with
-hybrid BM25 + dense vector search in parallel, RRF merge, cross-encoder reranking,
-deterministic query routing, JWT-enforced RBAC inside pgvector, context-hash semantic
-cache, multi-turn conversation, user feedback triage, S3 event-driven ingestion with
-two-tier change detection, and RAGAS evaluation proving retrieval quality improvement.
-```
