@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "Enterprise RAG Knowledge Assistant",
-    "description": "Complete API collection for the RAG system. Set the `TOKEN` variable before running auth-required requests.\n\nSetup:\n1. Generate a token using the 'Generate JWT Token (Python)' instructions\n2. Set the collection variable `TOKEN` to that value\n3. Run requests in order: health → ingest → ask",
+    "description": "Complete API collection for the RAG system.\n\nSetup:\n1. Set collection variable TOKEN to a generated JWT\n2. Run requests in folder order — test scripts auto-capture jobId, conversationId into environment variables so downstream requests use them automatically.",
     "_postman_id": "rag-api-v1",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
@@ -19,7 +19,20 @@
             "method": "GET",
             "url": "{{BASE_URL}}/health",
             "description": "Check server, DB, and env status. No auth required."
-          }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const response = pm.response.json();",
+                  "pm.test('Status is ok', () => pm.expect(response.status).to.eql('ok'));",
+                  "pm.test('DB is ok',     () => pm.expect(response.db).to.eql('ok'));",
+                  "console.log('Health:', response.status, '| DB:', response.db, '| Env:', response.env);"
+                ]
+              }
+            }
+          ]
         }
       ]
     },
@@ -38,25 +51,49 @@
                 {
                   "key": "file",
                   "type": "file",
-                  "src": "data/sample_docs/hr_policy.md",
-                  "description": "Select file manually in Postman"
+                  "src": [],
+                  "description": "Select hr_policy.md from data/sample_docs/"
                 }
               ]
             },
-            "description": "Upload a document for indexing. Returns a job_id to poll status."
-          }
+            "description": "Upload a document for indexing. Test script auto-captures job_id into the 'jobId' environment variable."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const response = pm.response.json();",
+                  "pm.environment.set('jobId', response.job_id);",
+                  "console.log('Job ID:', response.job_id);",
+                  "pm.test('Has job_id',  () => pm.expect(response.job_id).to.be.a('string'));",
+                  "pm.test('Status queued', () => pm.expect(response.status).to.eql('queued'));"
+                ]
+              }
+            }
+          ]
         },
         {
-          "name": "GET /documents/status/:job_id",
+          "name": "GET /documents/status/{{jobId}}",
           "request": {
             "method": "GET",
-            "url": {
-              "raw": "{{BASE_URL}}/documents/status/REPLACE_WITH_JOB_ID",
-              "host": ["{{BASE_URL}}"],
-              "path": ["documents", "status", "REPLACE_WITH_JOB_ID"]
-            },
-            "description": "Poll job status. Status values: queued → processing → done / failed"
-          }
+            "url": "{{BASE_URL}}/documents/status/{{jobId}}",
+            "description": "Poll job status. jobId is auto-set by the upload request above. Run until status = done."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const response = pm.response.json();",
+                  "console.log('Job status:', response.status, '| Source:', response.source);",
+                  "pm.test('Status is done or processing', () => {",
+                  "  pm.expect(response.status).to.be.oneOf(['queued','processing','done','failed']);",
+                  "});"
+                ]
+              }
+            }
+          ]
         },
         {
           "name": "POST /documents/ingest-samples",
@@ -64,8 +101,20 @@
             "method": "POST",
             "url": "{{BASE_URL}}/documents/ingest-samples",
             "header": [{ "key": "Authorization", "value": "Bearer {{TOKEN}}" }],
-            "description": "Ingest all files in data/sample_docs/. Skips unchanged files."
-          }
+            "description": "Ingest all files in data/sample_docs/. Returns 0 if files are already indexed (no change)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const response = pm.response.json();",
+                  "console.log('Ingested:', response.chunks_indexed, 'chunks from', response.documents_loaded, 'docs');",
+                  "pm.test('Response has chunks_indexed', () => pm.expect(response).to.have.property('chunks_indexed'));"
+                ]
+              }
+            }
+          ]
         },
         {
           "name": "POST /documents/sync",
@@ -73,8 +122,19 @@
             "method": "POST",
             "url": "{{BASE_URL}}/documents/sync",
             "header": [{ "key": "Authorization", "value": "Bearer {{TOKEN}}" }],
-            "description": "Re-scan docs folder for changes and re-index modified files."
-          }
+            "description": "Re-scan docs folder and re-index any changed files."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const response = pm.response.json();",
+                  "console.log('Sync — indexed:', response.indexed?.length, '| skipped:', response.skipped?.length);"
+                ]
+              }
+            }
+          ]
         },
         {
           "name": "GET /documents",
@@ -82,8 +142,21 @@
             "method": "GET",
             "url": "{{BASE_URL}}/documents",
             "header": [{ "key": "Authorization", "value": "Bearer {{TOKEN}}" }],
-            "description": "List all indexed documents with metadata."
-          }
+            "description": "List all indexed documents with department, access_level, and chunk count."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const response = pm.response.json();",
+                  "pm.test('Returns array', () => pm.expect(response).to.be.an('array'));",
+                  "console.log('Total docs indexed:', response.length);",
+                  "response.forEach(d => console.log(' -', d.source, '|', d.department, '|', d.access_level, '| chunks:', d.chunks_count));"
+                ]
+              }
+            }
+          ]
         }
       ]
     },
@@ -96,63 +169,118 @@
             "method": "POST",
             "url": "{{BASE_URL}}/search",
             "header": [
-              { "key": "Authorization",  "value": "Bearer {{TOKEN}}" },
-              { "key": "Content-Type",   "value": "application/json" }
+              { "key": "Authorization", "value": "Bearer {{TOKEN}}" },
+              { "key": "Content-Type",  "value": "application/json" }
             ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"question\": \"What is the PTO policy?\"\n}"
             },
-            "description": "Hybrid semantic+BM25 search. Returns top-k chunks."
-          }
+            "description": "Hybrid semantic+BM25 search. Returns top-k chunks with scores."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const response = pm.response.json();",
+                  "pm.test('Has results array', () => pm.expect(response.results).to.be.an('array'));",
+                  "pm.test('Search mode set',  () => pm.expect(response.search_mode).to.be.a('string'));",
+                  "console.log('Search mode:', response.search_mode, '| Results:', response.results.length);",
+                  "response.results.forEach(r => console.log(' -', r.source?.source, 'score:', r.source?.score));"
+                ]
+              }
+            }
+          ]
         },
         {
-          "name": "POST /ask",
+          "name": "POST /ask (1st call - LLM)",
           "request": {
             "method": "POST",
             "url": "{{BASE_URL}}/ask",
             "header": [
-              { "key": "Authorization",  "value": "Bearer {{TOKEN}}" },
-              { "key": "Content-Type",   "value": "application/json" }
+              { "key": "Authorization", "value": "Bearer {{TOKEN}}" },
+              { "key": "Content-Type",  "value": "application/json" }
             ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"question\": \"What is the PTO policy and how many vacation days do employees get?\",\n  \"search_mode\": \"auto\",\n  \"top_k\": 4\n}"
             },
-            "description": "Full RAG: retrieval + LLM answer. Checks cache on second call."
-          }
+            "description": "Full RAG answer. First call hits LLM (~5-7s). Captures conversation_id automatically."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const response = pm.response.json();",
+                  "pm.environment.set('conversationId', response.conversation_id);",
+                  "console.log('Conversation ID:', response.conversation_id);",
+                  "console.log('Cached:', response.cached);",
+                  "console.log('Answer:', response.answer?.substring(0, 120) + '...');",
+                  "pm.test('Has answer',          () => pm.expect(response.answer).to.be.a('string').and.not.empty);",
+                  "pm.test('Has conversation_id', () => pm.expect(response.conversation_id).to.be.a('string'));",
+                  "pm.test('Not cached (1st)',    () => pm.expect(response.cached).to.be.false);"
+                ]
+              }
+            }
+          ]
         },
         {
-          "name": "POST /ask (cache hit - same question)",
+          "name": "POST /ask (2nd call - cache hit)",
           "request": {
             "method": "POST",
             "url": "{{BASE_URL}}/ask",
             "header": [
-              { "key": "Authorization",  "value": "Bearer {{TOKEN}}" },
-              { "key": "Content-Type",   "value": "application/json" }
+              { "key": "Authorization", "value": "Bearer {{TOKEN}}" },
+              { "key": "Content-Type",  "value": "application/json" }
             ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"question\": \"What is the PTO policy and how many vacation days do employees get?\",\n  \"search_mode\": \"auto\",\n  \"top_k\": 4\n}"
             },
-            "description": "Run the same question again — response should show cached: true"
-          }
+            "description": "Exact same question — should return cached: true and respond in <1s."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const response = pm.response.json();",
+                  "console.log('Cached:', response.cached, '| Response time:', pm.response.responseTime + 'ms');",
+                  "pm.test('Is cached on 2nd call', () => pm.expect(response.cached).to.be.true);",
+                  "pm.test('Answer matches', () => pm.expect(response.answer).to.be.a('string').and.not.empty);"
+                ]
+              }
+            }
+          ]
         },
         {
-          "name": "POST /ask/stream",
+          "name": "POST /ask/stream (SSE)",
           "request": {
             "method": "POST",
             "url": "{{BASE_URL}}/ask/stream",
             "header": [
-              { "key": "Authorization",  "value": "Bearer {{TOKEN}}" },
-              { "key": "Content-Type",   "value": "application/json" }
+              { "key": "Authorization", "value": "Bearer {{TOKEN}}" },
+              { "key": "Content-Type",  "value": "application/json" }
             ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"question\": \"Explain the incident response procedure step by step\"\n}"
             },
-            "description": "Streaming SSE response. Open in browser or use curl --no-buffer."
-          }
+            "description": "Streaming SSE response. Tokens arrive one by one. Check raw response body for 'data:' lines."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Response received', () => pm.expect(pm.response.code).to.eql(200));",
+                  "console.log('Stream response size:', pm.response.responseSize, 'bytes');"
+                ]
+              }
+            }
+          ]
         }
       ]
     },
@@ -160,49 +288,84 @@
       "name": "4. Conversations",
       "item": [
         {
-          "name": "POST /ask (turn 1 - start conversation)",
+          "name": "POST /ask (turn 1 - new conversation)",
           "request": {
             "method": "POST",
             "url": "{{BASE_URL}}/ask",
             "header": [
-              { "key": "Authorization",  "value": "Bearer {{TOKEN}}" },
-              { "key": "Content-Type",   "value": "application/json" }
+              { "key": "Authorization", "value": "Bearer {{TOKEN}}" },
+              { "key": "Content-Type",  "value": "application/json" }
             ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"question\": \"What is the security policy?\"\n}"
             },
-            "description": "Start a new conversation. Response includes conversation_id — copy it and paste into turn 2 below."
-          }
+            "description": "Start a new conversation. Test script captures conversation_id into environment automatically."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const response = pm.response.json();",
+                  "pm.environment.set('conversationId', response.conversation_id);",
+                  "console.log('Conversation ID:', response.conversation_id);",
+                  "console.log('Answer:', response.answer?.substring(0, 100) + '...');",
+                  "pm.test('Has conversation_id', () => pm.expect(response.conversation_id).to.be.a('string'));"
+                ]
+              }
+            }
+          ]
         },
         {
-          "name": "POST /ask (turn 2 - continue conversation)",
+          "name": "POST /ask (turn 2 - follow-up)",
           "request": {
             "method": "POST",
             "url": "{{BASE_URL}}/ask",
             "header": [
-              { "key": "Authorization",  "value": "Bearer {{TOKEN}}" },
-              { "key": "Content-Type",   "value": "application/json" }
+              { "key": "Authorization", "value": "Bearer {{TOKEN}}" },
+              { "key": "Content-Type",  "value": "application/json" }
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"question\": \"Can you summarize that in one sentence?\",\n  \"conversation_id\": \"PASTE_CONV_ID_FROM_TURN_1\"\n}"
+              "raw": "{\n  \"question\": \"Can you summarize that in one sentence?\",\n  \"conversation_id\": \"{{conversationId}}\"\n}"
             },
-            "description": "Follow-up question. Paste the conversation_id from turn 1 to maintain context."
-          }
+            "description": "Follow-up question. Uses {{conversationId}} auto-captured from turn 1."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const response = pm.response.json();",
+                  "console.log('Follow-up answer:', response.answer);",
+                  "pm.test('Has answer', () => pm.expect(response.answer).to.be.a('string').and.not.empty);"
+                ]
+              }
+            }
+          ]
         },
         {
-          "name": "GET /conversations/:id (get history)",
+          "name": "GET /conversations/{{conversationId}}",
           "request": {
             "method": "GET",
-            "url": {
-              "raw": "{{BASE_URL}}/conversations/REPLACE_WITH_CONV_ID",
-              "host": ["{{BASE_URL}}"],
-              "path": ["conversations", "REPLACE_WITH_CONV_ID"]
-            },
+            "url": "{{BASE_URL}}/conversations/{{conversationId}}",
             "header": [{ "key": "Authorization", "value": "Bearer {{TOKEN}}" }],
-            "description": "Get full conversation history (all turns). Returns 403 if you are not the owner."
-          }
+            "description": "Fetch full conversation history. Uses {{conversationId}} auto-captured from turn 1."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const response = pm.response.json();",
+                  "pm.test('Returns array of turns', () => pm.expect(response).to.be.an('array'));",
+                  "console.log('Total turns:', response.length);",
+                  "response.forEach(t => console.log(' [' + t.role.toUpperCase() + ']', t.content?.substring(0, 80) + '...'));"
+                ]
+              }
+            }
+          ]
         }
       ]
     },
@@ -215,15 +378,26 @@
             "method": "POST",
             "url": "{{BASE_URL}}/feedback",
             "header": [
-              { "key": "Authorization",  "value": "Bearer {{TOKEN}}" },
-              { "key": "Content-Type",   "value": "application/json" }
+              { "key": "Authorization", "value": "Bearer {{TOKEN}}" },
+              { "key": "Content-Type",  "value": "application/json" }
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"question\": \"What is the PTO policy?\",\n  \"answer\": \"Employees get 20 days PTO.\",\n  \"rating\": 1,\n  \"comment\": \"Very helpful!\"\n}"
+              "raw": "{\n  \"question\": \"What is the PTO policy?\",\n  \"answer\": \"Employees get 20 days PTO per year.\",\n  \"rating\": 1,\n  \"comment\": \"Clear and accurate!\"\n}"
             },
-            "description": "Submit thumbs-up (rating=1) or thumbs-down (rating=-1) feedback."
-          }
+            "description": "Submit feedback. rating=1 is thumbs-up, rating=-1 is thumbs-down."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Feedback accepted (200)', () => pm.expect(pm.response.code).to.eql(200));",
+                  "console.log('Feedback response:', pm.response.text());"
+                ]
+              }
+            }
+          ]
         },
         {
           "name": "GET /feedback/summary",
@@ -232,10 +406,21 @@
             "url": "{{BASE_URL}}/feedback/summary",
             "header": [{ "key": "Authorization", "value": "Bearer {{TOKEN}}" }],
             "description": "Aggregated feedback stats. Admin only."
-          }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const response = pm.response.json();",
+                  "console.log('Feedback summary:', JSON.stringify(response, null, 2));"
+                ]
+              }
+            }
+          ]
         },
         {
-          "name": "GET /feedback/triage",
+          "name": "GET /feedback/triage?limit=20",
           "request": {
             "method": "GET",
             "url": {
@@ -245,8 +430,20 @@
               "query": [{ "key": "limit", "value": "20" }]
             },
             "header": [{ "key": "Authorization", "value": "Bearer {{TOKEN}}" }],
-            "description": "List recent negative feedback for engineer review."
-          }
+            "description": "List recent negative feedback for engineer review. Admin only."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const response = pm.response.json();",
+                  "pm.test('Returns array', () => pm.expect(response).to.be.an('array'));",
+                  "console.log('Negative feedback items:', response.length);"
+                ]
+              }
+            }
+          ]
         }
       ]
     },
@@ -259,8 +456,20 @@
             "method": "GET",
             "url": "{{BASE_URL}}/cache/stats",
             "header": [{ "key": "Authorization", "value": "Bearer {{TOKEN}}" }],
-            "description": "Cache hit/miss counts and size."
-          }
+            "description": "Cache hit/miss counts and entry count."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const response = pm.response.json();",
+                  "console.log('Cache entries:', response.total_entries, '| Hits:', response.total_hits, '| Live:', response.live_entries);",
+                  "pm.test('Has total_entries', () => pm.expect(response).to.have.property('total_entries'));"
+                ]
+              }
+            }
+          ]
         },
         {
           "name": "DELETE /cache",
@@ -268,8 +477,19 @@
             "method": "DELETE",
             "url": "{{BASE_URL}}/cache",
             "header": [{ "key": "Authorization", "value": "Bearer {{TOKEN}}" }],
-            "description": "Flush the entire query cache."
-          }
+            "description": "Flush the entire query cache. Next /ask call will re-hit the LLM."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Cache cleared (200)', () => pm.expect(pm.response.code).to.eql(200));",
+                  "console.log('Cache flush response:', pm.response.text());"
+                ]
+              }
+            }
+          ]
         }
       ]
     },
@@ -277,7 +497,7 @@
       "name": "7. Debug (local/dev only)",
       "item": [
         {
-          "name": "GET /debug/chunks",
+          "name": "GET /debug/chunks?limit=10",
           "request": {
             "method": "GET",
             "url": {
@@ -287,8 +507,21 @@
               "query": [{ "key": "limit", "value": "10" }]
             },
             "header": [{ "key": "Authorization", "value": "Bearer {{TOKEN}}" }],
-            "description": "Inspect stored chunks in the vector DB. Returns 404 in production."
-          }
+            "description": "Inspect raw stored chunks. Returns 404 in production environments."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const response = pm.response.json();",
+                  "pm.test('Returns chunks array', () => pm.expect(response).to.be.an('array'));",
+                  "console.log('Chunks returned:', response.length);",
+                  "response.forEach(c => console.log(' -', c.source, '|', c.department, '| chars:', c.text?.length));"
+                ]
+              }
+            }
+          ]
         }
       ]
     }
