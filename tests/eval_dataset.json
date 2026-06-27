@@ -1,0 +1,86 @@
+[
+  {
+    "question": "How many paid time off days do full-time employees receive per year?",
+    "ground_truth": "Full-time employees receive 20 paid time off days per calendar year.",
+    "ground_truth_context": "Full-time employees receive 20 paid time off days per calendar year. Employees may carry over up to 5 unused PTO days into the next calendar year.",
+    "domain": "hr",
+    "access_level": "internal"
+  },
+  {
+    "question": "How many PTO days can employees carry over to the next year?",
+    "ground_truth": "Employees may carry over up to 5 unused PTO days into the next calendar year. Any PTO above the 5-day carryover limit expires on December 31.",
+    "ground_truth_context": "Employees may carry over up to 5 unused PTO days into the next calendar year. Any PTO above the 5-day carryover limit expires on December 31.",
+    "domain": "hr",
+    "access_level": "internal"
+  },
+  {
+    "question": "How many sick leave days are employees entitled to?",
+    "ground_truth": "Employees receive 10 sick leave days per calendar year. Sick leave does not require advance notice.",
+    "ground_truth_context": "Employees receive 10 sick leave days per calendar year. Sick leave does not require advance notice, but employees should notify their manager as soon as practical.",
+    "domain": "hr",
+    "access_level": "internal"
+  },
+  {
+    "question": "How many days per week can employees work remotely?",
+    "ground_truth": "Employees may work remotely up to 3 days per week with manager approval.",
+    "ground_truth_context": "Employees may work remotely up to 3 days per week with manager approval. Teams handling regulated customer data must follow the secure workspace policy.",
+    "domain": "hr",
+    "access_level": "internal"
+  },
+  {
+    "question": "What is the on-call response time for a Sev-1 incident?",
+    "ground_truth": "The on-call engineer must acknowledge a Sev-1 alert within 5 minutes.",
+    "ground_truth_context": "For a Sev-1 incident, the on-call engineer must acknowledge the alert within 5 minutes, open an incident channel, assign an incident commander, and post status updates every 15 minutes until resolution.",
+    "domain": "security",
+    "access_level": "confidential"
+  },
+  {
+    "question": "How often must status updates be posted during a Sev-1 incident?",
+    "ground_truth": "Status updates must be posted every 15 minutes during a Sev-1 incident until resolution.",
+    "ground_truth_context": "For a Sev-1 incident, the on-call engineer must acknowledge the alert within 5 minutes, open an incident channel, assign an incident commander, and post status updates every 15 minutes until resolution.",
+    "domain": "security",
+    "access_level": "confidential"
+  },
+  {
+    "question": "Within how many business days must a postmortem be completed after a Sev-1 incident?",
+    "ground_truth": "A postmortem must be completed within 3 business days for Sev-1 and Sev-2 incidents.",
+    "ground_truth_context": "A postmortem must be completed within 3 business days for Sev-1 and Sev-2 incidents. The postmortem should include timeline, root cause, customer impact, corrective actions, and owners.",
+    "domain": "security",
+    "access_level": "confidential"
+  },
+  {
+    "question": "What causes most login issues for customers?",
+    "ground_truth": "Most login issues are caused by expired sessions, incorrect identity provider configuration, or blocked third-party cookies.",
+    "ground_truth_context": "Most login issues are caused by expired sessions, incorrect identity provider configuration, or blocked third-party cookies. Support should first ask the customer to confirm their identity provider settings.",
+    "domain": "support",
+    "access_level": "public"
+  },
+  {
+    "question": "How long are data export files available in the admin console?",
+    "ground_truth": "Exports are generated as CSV files and remain available for 7 days.",
+    "ground_truth_context": "Workspace administrators can export audit logs and usage reports from the admin console. Exports are generated as CSV files and remain available for 7 days.",
+    "domain": "support",
+    "access_level": "public"
+  },
+  {
+    "question": "How often must production database credentials be rotated?",
+    "ground_truth": "Production database credentials must be rotated every 90 days.",
+    "ground_truth_context": "Production database credentials must be rotated every 90 days. Emergency credential rotation is required immediately after suspected compromise or employee offboarding from a privileged role.",
+    "domain": "security",
+    "access_level": "confidential"
+  },
+  {
+    "question": "When is emergency credential rotation required?",
+    "ground_truth": "Emergency credential rotation is required immediately after suspected compromise or employee offboarding from a privileged role.",
+    "ground_truth_context": "Emergency credential rotation is required immediately after suspected compromise or employee offboarding from a privileged role.",
+    "domain": "security",
+    "access_level": "confidential"
+  },
+  {
+    "question": "Within how many days must company laptops apply OS updates?",
+    "ground_truth": "Company laptops must apply operating system updates within 14 days of release.",
+    "ground_truth_context": "Company laptops must use full-disk encryption, automatic screen lock, endpoint protection, and operating system updates within 14 days of release.",
+    "domain": "security",
+    "access_level": "confidential"
+  }
+]

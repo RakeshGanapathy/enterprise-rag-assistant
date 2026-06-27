@@ -1,0 +1,2 @@
+"""Enterprise RAG Knowledge Assistant."""
+

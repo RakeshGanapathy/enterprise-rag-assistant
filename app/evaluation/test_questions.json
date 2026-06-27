@@ -1,0 +1,22 @@
+[
+  {
+    "question": "How many PTO days can employees carry over?",
+    "expected_source": "hr_policy.md",
+    "expected_keywords": ["5", "carry over", "PTO"]
+  },
+  {
+    "question": "How quickly must on-call acknowledge a Sev-1 alert?",
+    "expected_source": "incident_response.md",
+    "expected_keywords": ["5 minutes", "acknowledge"]
+  },
+  {
+    "question": "How often must production database credentials be rotated?",
+    "expected_source": "security_policy.md",
+    "expected_keywords": ["90 days", "rotated"]
+  },
+  {
+    "question": "How long are data exports available?",
+    "expected_source": "product_faq.md",
+    "expected_keywords": ["7 days"]
+  }
+]

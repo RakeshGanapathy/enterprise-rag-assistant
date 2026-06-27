@@ -1,0 +1,38 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+
+# Secrets
+.env
+*.pem
+*.key
+
+# Tools
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Legacy vector store (pgvector only now)
+chroma_db/
+data/vector_store.sqlite3
+
+# Runtime
+data/uploads/
+data/processed/
+
+# Evaluation reports (generated, can be large)
+tests/eval_reports/
+
+# Langfuse self-hosted (separate repo — run via docker compose separately)
+langfuse/
+
+# OS
+.DS_Store
+Thumbs.db
