@@ -22,10 +22,16 @@ from app.retrieval.streaming import stream_rag_answer
 from app.retrieval.vector_store import list_stored_chunks
 from app.tracing import is_tracing_enabled, trace_span
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+from app.correlation import CorrelationIdFilter, CorrelationIdMiddleware
+
+_handler = logging.StreamHandler()
+_handler.addFilter(CorrelationIdFilter())
+_handler.setFormatter(
+    logging.Formatter(
+        "%(asctime)s %(correlation_id)s %(name)s %(levelname)s %(message)s"
+    )
 )
+logging.basicConfig(level=logging.INFO, handlers=[_handler])
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -88,6 +94,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title=settings.app_name, lifespan=lifespan)
 
+app.add_middleware(CorrelationIdMiddleware)
 if is_tracing_enabled():
     app.add_middleware(LangfuseTracingMiddleware)
 

@@ -86,18 +86,19 @@ def hybrid_search_chunks(
     #
     # Two DB connections are fine: pgvector/psycopg3 connections are not shared
     # across threads; each future opens and closes its own connection.
+    from app.retrieval.bm25_cache import get_cached_corpus
+
     if settings.vector_store_backend == "pgvector":
         _search_fn = lambda: _search_chunks_pgvector(query_vector, candidate_k, access_filter)
-        _corpus_fn = lambda: _load_all_docs_pgvector(access_filter)
     else:
         _search_fn = lambda: _search_chunks_sqlite(query_vector, candidate_k, access_filter)
-        _corpus_fn = lambda: _load_all_docs_sqlite(access_filter)
 
-    with ThreadPoolExecutor(max_workers=2) as pool:
+    # Corpus comes from in-memory cache — no DB round-trip when cache is warm.
+    # Semantic search still needs the DB, so run it in a thread while we check cache.
+    with ThreadPoolExecutor(max_workers=1) as pool:
         semantic_future = pool.submit(_search_fn)
-        corpus_future = pool.submit(_corpus_fn)
-        semantic_results = semantic_future.result()   # blocks until done
-        corpus_docs = corpus_future.result()          # blocks until done
+        corpus_docs = get_cached_corpus(access_filter)   # fast path: cache hit
+        semantic_results = semantic_future.result()
 
     # Step 3: BM25 on full corpus (CPU-bound, runs after corpus is loaded)
     corpus_texts = [doc.page_content for doc in corpus_docs]
@@ -144,6 +145,7 @@ def search_chunks(
 
 def _delete_chunks_by_source(connection, source: str) -> None:
     """Delete all chunks belonging to a source document. Called before re-indexing."""
+    from app.retrieval.bm25_cache import bump_corpus_version
     settings = get_settings()
     if settings.vector_store_backend == "pgvector":
         connection.execute(
@@ -155,6 +157,7 @@ def _delete_chunks_by_source(connection, source: str) -> None:
             "DELETE FROM chunks WHERE json_extract(metadata_json, '$.source') = ?",
             (source,),
         )
+    bump_corpus_version()
 
 
 def reset_vector_store() -> None:
@@ -266,6 +269,7 @@ def _search_chunks_sqlite(
 
 # Index the text chunks by embedding them and storing the text, metadata, and embeddings in a PostgreSQL database using the pgvector extension. The function returns the number of chunks indexed. If there are no chunks to index, it returns 0 without performing any database operations. --- IGNORE ---
 def _index_chunks_pgvector(chunks: list[TextChunk], vectors: list[list[float]]) -> None:
+    from app.retrieval.bm25_cache import bump_corpus_version
     with _connect_pgvector() as connection:
         _create_table_pgvector(connection)
         for chunk, vector in zip(chunks, vectors):
@@ -286,6 +290,7 @@ def _index_chunks_pgvector(chunks: list[TextChunk], vectors: list[list[float]]) 
                     vector,
                 ),
             )
+    bump_corpus_version()
 
 # Search for relevant chunks based on a question by embedding the question and comparing it to the stored chunk embeddings using cosine similarity. The top K most similar chunks are returned as a list of tuples containing the Document and its similarity score. --- IGNORE ---
 def _search_chunks_pgvector(

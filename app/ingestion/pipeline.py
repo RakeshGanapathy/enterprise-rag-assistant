@@ -253,14 +253,15 @@ def _download_from_s3(bucket: str, key: str, presigned_url: str | None = None) -
     Presigned URL is the preferred pattern: Lambda generates the URL using its own
     IAM role, passes it to the RAG API. The RAG API never needs S3 credentials.
     """
-    import urllib.request
-
     suffix = Path(key).suffix
     with NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
         tmp_path = Path(tmp.name)
 
     if presigned_url:
-        urllib.request.urlretrieve(presigned_url, tmp_path)
+        import httpx
+        resp = httpx.get(presigned_url, follow_redirects=True, timeout=60)
+        resp.raise_for_status()
+        tmp_path.write_bytes(resp.content)
         return tmp_path
 
     # Direct boto3 download
