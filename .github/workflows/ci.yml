@@ -41,9 +41,7 @@ jobs:
           cache: pip
 
       - name: Install dependencies
-        run: |
-          pip install --upgrade pip setuptools wheel
-          pip install -r requirements.txt pytest-cov
+        run: pip install -r requirements.txt pytest-cov
 
       - name: Run tests with coverage
         run: |
