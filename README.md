@@ -209,6 +209,11 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
+> **Evaluation extras** (`ragas`, `datasets`) are in a separate file to keep the install lean. Install them only when you need to run RAGAS evaluations:
+> ```bash
+> pip install -r requirements-eval.txt
+> ```
+
 ### 3. Start pgvector
 
 ```bash
@@ -377,7 +382,10 @@ curl -X POST http://localhost:8000/feedback \
 
 ### Run RAGAS evaluation
 
+RAGAS and its dependencies are not installed by default (they pull in a heavy ML stack). Install the eval extras first:
+
 ```bash
+pip install -r requirements-eval.txt
 python tests/run_evaluation.py
 ```
 
@@ -637,5 +645,8 @@ tests/
 ├── eval_dataset.json        12 golden Q&A pairs
 ├── eval_reports/            RAGAS JSON reports (gitignored)
 └── run_evaluation.py        CLI evaluation script
+
+requirements.txt             API + test dependencies (what CI installs)
+requirements-eval.txt        Eval extras: ragas + datasets (install separately)
 ```
 
