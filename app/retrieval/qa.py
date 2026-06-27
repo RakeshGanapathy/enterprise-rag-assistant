@@ -1,3 +1,5 @@
+import logging
+
 from app.retrieval.models import AccessFilter, AskResponse, SearchMode, SearchResponse, SearchResult, Source
 from app.retrieval.query_router import classify_query
 from app.retrieval.vector_store import access_filter_for_role, hybrid_search_chunks, search_chunks
@@ -169,8 +171,9 @@ def _save_turn(conversation_id: str, question: str, answer: str) -> None:
             ensure_conversations_table(conn)
             append_turn(conn, conversation_id, "user", question)
             append_turn(conn, conversation_id, "assistant", answer)
-    except Exception:
-        pass   # conversation persistence failure never breaks the response
+            conn.commit()
+    except Exception as e:
+        logging.getLogger(__name__).warning("Failed to save conversation turn: %s", e)
 
 
 # ── cache helpers ─────────────────────────────────────────────────────────────
