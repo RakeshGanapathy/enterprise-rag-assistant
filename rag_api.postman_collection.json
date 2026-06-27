@@ -160,10 +160,10 @@
       "name": "4. Conversations",
       "item": [
         {
-          "name": "POST /conversations",
+          "name": "POST /ask (turn 1 - start conversation)",
           "request": {
             "method": "POST",
-            "url": "{{BASE_URL}}/conversations",
+            "url": "{{BASE_URL}}/ask",
             "header": [
               { "key": "Authorization",  "value": "Bearer {{TOKEN}}" },
               { "key": "Content-Type",   "value": "application/json" }
@@ -172,11 +172,27 @@
               "mode": "raw",
               "raw": "{\n  \"question\": \"What is the security policy?\"\n}"
             },
-            "description": "Start a new conversation. Returns conversation_id."
+            "description": "Start a new conversation. Response includes conversation_id — copy it and paste into turn 2 below."
           }
         },
         {
-          "name": "GET /conversations/:id",
+          "name": "POST /ask (turn 2 - continue conversation)",
+          "request": {
+            "method": "POST",
+            "url": "{{BASE_URL}}/ask",
+            "header": [
+              { "key": "Authorization",  "value": "Bearer {{TOKEN}}" },
+              { "key": "Content-Type",   "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"question\": \"Can you summarize that in one sentence?\",\n  \"conversation_id\": \"PASTE_CONV_ID_FROM_TURN_1\"\n}"
+            },
+            "description": "Follow-up question. Paste the conversation_id from turn 1 to maintain context."
+          }
+        },
+        {
+          "name": "GET /conversations/:id (get history)",
           "request": {
             "method": "GET",
             "url": {
@@ -185,7 +201,7 @@
               "path": ["conversations", "REPLACE_WITH_CONV_ID"]
             },
             "header": [{ "key": "Authorization", "value": "Bearer {{TOKEN}}" }],
-            "description": "Get conversation history. Returns 403 if you don't own it."
+            "description": "Get full conversation history (all turns). Returns 403 if you are not the owner."
           }
         }
       ]
