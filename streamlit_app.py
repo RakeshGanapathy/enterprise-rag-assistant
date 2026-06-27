@@ -29,6 +29,8 @@ if "conversation_id" not in st.session_state:
     st.session_state.conversation_id = None
 if "jwt_token" not in st.session_state:
     st.session_state.jwt_token = ""
+if "pending_question" not in st.session_state:
+    st.session_state.pending_question = None
 
 # Page config
 st.set_page_config(page_title='RAG Knowledge Assistant', layout='wide')
@@ -266,9 +268,8 @@ with tab_ask:
     for i, col in enumerate([col_s1, col_s2, col_s3]):
         with col:
             if st.button(f'"{sample_questions[i]}"', use_container_width=True):
-                st.session_state.chat_messages.append(
-                    {'role': 'user', 'content': sample_questions[i]}
-                )
+                st.session_state.pending_question = sample_questions[i]
+                st.rerun()
 
     st.markdown('---')
 
@@ -289,18 +290,14 @@ with tab_ask:
                             st.write(f"**{s.get('source','?')}{relevance}**")
 
     st.markdown('---')
-    col_input, col_button = st.columns([4, 1])
-    with col_input:
-        user_input = st.text_input(
-            'Your question:',
-            placeholder='Ask something about the documents...',
-            label_visibility='collapsed',
-        )
-    with col_button:
-        st.write('')
-        submit_btn = st.button('Send', use_container_width=True, type='primary')
+    user_input = st.chat_input('Ask something about the documents...')
 
-    if submit_btn and user_input:
+    # Sample question buttons fire a rerun with pending_question set
+    if st.session_state.pending_question:
+        user_input = st.session_state.pending_question
+        st.session_state.pending_question = None
+
+    if user_input:
         st.session_state.chat_messages.append({'role': 'user', 'content': user_input})
         try:
             with st.spinner('Searching and generating answer...'):
