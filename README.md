@@ -1,6 +1,8 @@
 # Enterprise RAG Knowledge Assistant
 
-A production-grade Retrieval-Augmented Generation system built with FastAPI, LangGraph, and pgvector. Built as a 4-day crash course progressively extended with enterprise features.
+![Python](https://img.shields.io/badge/Python-3.11+-blue?logo=python) ![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-green?logo=fastapi) ![pgvector](https://img.shields.io/badge/pgvector-HNSW-blueviolet) ![LangGraph](https://img.shields.io/badge/LangGraph-stateful-orange) ![License](https://img.shields.io/badge/license-MIT-blue)
+
+A production-grade Retrieval-Augmented Generation system built with FastAPI, LangGraph, and pgvector.
 
 ---
 
@@ -185,7 +187,7 @@ Four metrics: `context_precision`, `context_recall`, `faithfulness`, `answer_rel
 ### 1. Clone and create virtual environment
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/enterprise-rag.git
+git clone https://github.com/RakeshGanapathy/enterprise-rag-assistant.git
 cd enterprise-rag
 python -m venv .venv
 
