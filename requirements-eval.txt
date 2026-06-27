@@ -1,0 +1,3 @@
+-r requirements.txt
+ragas>=0.4.0
+datasets>=2.0.0
