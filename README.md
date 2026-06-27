@@ -44,6 +44,28 @@ Client
 
 ---
 
+## UI & API Screenshots
+
+### Streamlit UI — RAG Knowledge Assistant
+
+> **URL:** `http://localhost:8501`
+
+![Streamlit UI](docs/screenshots/streamlit_ui.png)
+
+**Ask Questions tab** — multi-turn chat with source citations and cache badge:
+
+![Streamlit Ask](docs/screenshots/streamlit_ask.png)
+
+---
+
+### Swagger API Docs
+
+> **URL:** `http://localhost:8000/docs`
+
+![Swagger UI](docs/screenshots/swagger_ui.png)
+
+---
+
 ## Stack
 
 | Layer | Technology |
