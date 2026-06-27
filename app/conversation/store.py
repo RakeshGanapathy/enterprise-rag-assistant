@@ -17,7 +17,9 @@ import uuid
 from datetime import datetime, timezone
 
 
-MAX_HISTORY_TURNS = 6   # last 6 turns (3 user + 3 assistant) injected into LLM
+from app.config import get_settings
+
+MAX_HISTORY_TURNS = get_settings().max_history_turns
 
 
 def _now() -> datetime:
@@ -29,11 +31,17 @@ def ensure_conversations_table(connection) -> None:
         CREATE TABLE IF NOT EXISTS conversations (
             conversation_id  TEXT NOT NULL,
             turn_index       INTEGER NOT NULL,
-            role             TEXT NOT NULL,        -- 'user' | 'assistant'
+            role             TEXT NOT NULL,
             content          TEXT NOT NULL,
+            owner_subject    TEXT,
             created_at       TIMESTAMPTZ DEFAULT NOW(),
             PRIMARY KEY (conversation_id, turn_index)
         )
+    """)
+    # Add owner_subject column to existing tables (idempotent)
+    connection.execute("""
+        ALTER TABLE conversations
+        ADD COLUMN IF NOT EXISTS owner_subject TEXT
     """)
     connection.execute("""
         CREATE INDEX IF NOT EXISTS conversations_id_idx
@@ -58,21 +66,36 @@ def get_history(connection, conversation_id: str) -> list[dict]:
     return [{"role": row[0], "content": row[1]} for row in rows]
 
 
-def append_turn(connection, conversation_id: str, role: str, content: str) -> None:
+def get_owner(connection, conversation_id: str) -> str | None:
+    """Return the owner_subject of the first turn, or None if conversation doesn't exist."""
+    row = connection.execute(
+        "SELECT owner_subject FROM conversations WHERE conversation_id = %s LIMIT 1",
+        (conversation_id,),
+    ).fetchone()
+    return row[0] if row else None
+
+
+def append_turn(
+    connection,
+    conversation_id: str,
+    role: str,
+    content: str,
+    owner_subject: str | None = None,
+) -> None:
     """Append one turn. turn_index auto-increments per conversation."""
     connection.execute(
         """
-        INSERT INTO conversations (conversation_id, turn_index, role, content)
+        INSERT INTO conversations (conversation_id, turn_index, role, content, owner_subject)
         VALUES (
             %s,
             COALESCE(
                 (SELECT MAX(turn_index) + 1 FROM conversations WHERE conversation_id = %s),
                 0
             ),
-            %s, %s
+            %s, %s, %s
         )
         """,
-        (conversation_id, conversation_id, role, content),
+        (conversation_id, conversation_id, role, content, owner_subject),
     )
 
 

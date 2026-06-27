@@ -190,6 +190,27 @@ def get_job(connection, job_id: str) -> dict | None:
     }
 
 
+# ── stuck job reaper ─────────────────────────────────────────────────────────
+
+def reap_stuck_jobs(connection, stuck_after_minutes: int = 10) -> int:
+    """
+    Mark jobs stuck in 'processing' for longer than stuck_after_minutes as 'failed'.
+    Called at startup to recover from worker crashes mid-ingest.
+    """
+    result = connection.execute(
+        """
+        UPDATE ingest_jobs
+        SET status     = 'failed',
+            error      = 'Job timed out — worker may have restarted mid-ingest',
+            updated_at = %s
+        WHERE status = 'processing'
+          AND updated_at < NOW() - INTERVAL '%s minutes'
+        """,
+        (_now(), stuck_after_minutes),
+    )
+    return result.rowcount
+
+
 # ── helpers ───────────────────────────────────────────────────────────────────
 
 def _now() -> datetime:

@@ -4,7 +4,8 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 
-from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, UploadFile
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, UploadFile
+from pydantic import Field
 from fastapi.responses import StreamingResponse
 from fastapi.security import HTTPBearer
 
@@ -39,6 +40,15 @@ async def lifespan(app: FastAPI):
                 settings.db_pool_min_size, settings.db_pool_max_size)
     init_pool()
     logger.info("DB pool ready.")
+
+    # Reap jobs that were stuck in 'processing' from a previous crash
+    from app.db import get_conn
+    from app.ingestion.document_store import ensure_tables, reap_stuck_jobs
+    with get_conn() as conn:
+        ensure_tables(conn)
+        reaped = reap_stuck_jobs(conn)
+        if reaped:
+            logger.warning("Reaped %d stuck ingest jobs from previous run", reaped)
 
     if settings.sync_on_startup and Path(settings.sample_docs_dir).exists():
         logger.info("Startup sync: scanning %s for changes...", settings.sample_docs_dir)
@@ -108,20 +118,31 @@ def health() -> dict:
 # ── ingestion ─────────────────────────────────────────────────────────────────
 
 @app.post("/documents/ingest-samples")
-def ingest_samples() -> dict:
-    """Ingest sample docs. Skips files whose content has not changed since last ingest."""
+def ingest_samples(claims: TokenClaims = Depends(require_auth)) -> dict:
+    """Ingest sample docs. Requires auth. Skips files whose content has not changed."""
     with trace_span(name="ingest_samples", metadata={"operation": "ingest_directory"}) as span:
         result = ingest_directory("data/sample_docs")
         span["output"] = {"chunks_indexed": result.chunks_indexed}
         return result.model_dump()
 
 
+_MAX_UPLOAD_BYTES = 50 * 1024 * 1024  # 50 MB
+_ALLOWED_MIME_PREFIXES = {
+    "text/",
+    "application/pdf",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml",
+}
+
+
 @app.post("/documents/upload")
-async def upload_document(file: UploadFile, background_tasks: BackgroundTasks) -> dict:
+async def upload_document(
+    file: UploadFile,
+    background_tasks: BackgroundTasks,
+    claims: TokenClaims = Depends(require_auth),
+) -> dict:
     """
-    Upload a document for async ingestion.
+    Upload a document for async ingestion. Requires auth.
     Returns a job_id immediately. Poll /documents/status/{job_id} for progress.
-    Unchanged files (same content hash) complete instantly with chunks_indexed=0.
     """
     from app.ingestion.document_store import create_job, ensure_tables
     from app.retrieval.vector_store import _connect_pgvector
@@ -129,10 +150,20 @@ async def upload_document(file: UploadFile, background_tasks: BackgroundTasks) -
     if not file.filename:
         raise HTTPException(status_code=400, detail="filename is required")
 
-    suffix = Path(file.filename).suffix
+    suffix = Path(file.filename).suffix.lower()
+    if suffix not in {".txt", ".md", ".pdf", ".docx"}:
+        raise HTTPException(status_code=415, detail=f"Unsupported file type: {suffix}")
+
     content = await file.read()
 
-    # Save to temp file — background task owns the file and deletes it when done
+    if len(content) > _MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="File exceeds 50 MB limit")
+
+    # MIME type check — server-side verification, not just suffix
+    content_type = file.content_type or ""
+    if not any(content_type.startswith(p) for p in _ALLOWED_MIME_PREFIXES):
+        raise HTTPException(status_code=415, detail=f"Unsupported content type: {content_type}")
+
     with NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
         tmp_path = Path(tmp.name)
         tmp_path.write_bytes(content)
@@ -202,14 +233,10 @@ async def ingest_s3(request: S3IngestRequest, background_tasks: BackgroundTasks)
 
 
 @app.post("/documents/sync")
-def sync_documents() -> dict:
-    """
-    Scan the sample_docs folder for new or changed files and re-index them.
-    Unchanged files (same content hash) are skipped — safe to call repeatedly.
-    Call this whenever documents are updated in the storage folder.
-    """
+def sync_documents(claims: TokenClaims = Depends(require_auth)) -> dict:
+    """Scan docs folder for changes and re-index. Requires auth."""
     with trace_span(name="sync_documents", metadata={"operation": "sync"}) as span:
-        result = sync_directory("data/sample_docs")
+        result = sync_directory(settings.sample_docs_dir)
         span["output"] = {"indexed": len(result["indexed"]), "skipped": len(result["skipped"])}
         return result
 
@@ -349,11 +376,8 @@ def submit_feedback(
 
 
 @app.get("/feedback/summary")
-def feedback_summary() -> dict:
-    """
-    Aggregate feedback stats — total positive/negative, failure mode breakdown,
-    top flagged questions. Use this for weekly quality review.
-    """
+def feedback_summary(claims: TokenClaims = Depends(require_auth)) -> dict:
+    """Aggregate feedback stats. Requires auth."""
     from app.feedback.store import ensure_feedback_table, get_summary
     from app.retrieval.vector_store import _connect_pgvector
 
@@ -363,11 +387,11 @@ def feedback_summary() -> dict:
 
 
 @app.get("/feedback/triage")
-def feedback_triage(limit: int = 50) -> list[dict]:
-    """
-    List recent negative feedback entries for engineer review.
-    Ordered by most recent. Includes failure_mode classification.
-    """
+def feedback_triage(
+    limit: int = Field(default=50, ge=1, le=500),
+    claims: TokenClaims = Depends(require_auth),
+) -> list[dict]:
+    """List recent negative feedback for engineer review. Requires auth."""
     from app.feedback.store import ensure_feedback_table, list_negative_feedback
     from app.retrieval.vector_store import _connect_pgvector
 
@@ -379,20 +403,29 @@ def feedback_triage(limit: int = 50) -> list[dict]:
 # ── conversation history ──────────────────────────────────────────────────────
 
 @app.get("/conversations/{conversation_id}")
-def get_conversation(conversation_id: str) -> list[dict]:
-    """Return full turn history for a conversation."""
-    from app.conversation.store import ensure_conversations_table, get_history
+def get_conversation(
+    conversation_id: str,
+    claims: TokenClaims = Depends(require_auth),
+) -> list[dict]:
+    """Return full turn history for a conversation. Only the owner can read it."""
+    from app.conversation.store import ensure_conversations_table, get_history, get_owner
     from app.retrieval.vector_store import _connect_pgvector
+
     with _connect_pgvector() as conn:
         ensure_conversations_table(conn)
+        owner = get_owner(conn, conversation_id)
+        if owner is None:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        if owner != claims.subject:
+            raise HTTPException(status_code=403, detail="Access denied")
         return get_history(conn, conversation_id)
 
 
 # ── cache management ─────────────────────────────────────────────────────────
 
 @app.get("/cache/stats")
-def cache_stats_endpoint() -> dict:
-    """Cache hit counts, live vs expired entries."""
+def cache_stats_endpoint(claims: TokenClaims = Depends(require_auth)) -> dict:
+    """Cache hit counts, live vs expired entries. Requires auth."""
     from app.cache.query_cache import cache_stats, ensure_cache_table
     from app.retrieval.vector_store import _connect_pgvector
     with _connect_pgvector() as conn:
@@ -401,12 +434,11 @@ def cache_stats_endpoint() -> dict:
 
 
 @app.delete("/cache")
-def flush_cache_endpoint(expired_only: bool = True) -> dict:
-    """
-    Flush cache entries.
-    expired_only=true (default): remove only TTL-expired entries.
-    expired_only=false: wipe entire cache (use after re-indexing documents).
-    """
+def flush_cache_endpoint(
+    expired_only: bool = True,
+    claims: TokenClaims = Depends(require_auth),
+) -> dict:
+    """Flush cache entries. Requires auth."""
     from app.cache.query_cache import ensure_cache_table, flush_cache
     from app.retrieval.vector_store import _connect_pgvector
     with _connect_pgvector() as conn:
@@ -418,7 +450,13 @@ def flush_cache_endpoint(expired_only: bool = True) -> dict:
 # ── debug ─────────────────────────────────────────────────────────────────────
 
 @app.get("/debug/chunks")
-def debug_chunks(limit: int = 20) -> list[dict]:
+def debug_chunks(
+    limit: int = Field(default=20, ge=1, le=100),
+    claims: TokenClaims = Depends(require_auth),
+) -> list[dict]:
+    """Inspect stored chunks. Requires auth. Disabled in production."""
+    if settings.app_env not in {"local", "development"}:
+        raise HTTPException(status_code=404, detail="Not found")
     with trace_span(name="debug_chunks", input_data={"limit": limit}, metadata={"operation": "debug"}) as span:
         result = list_stored_chunks(limit)
         span["output"] = {"chunks_count": len(result)}

@@ -28,7 +28,7 @@ class Source(BaseModel):
 
 
 class SearchRequest(BaseModel):
-    question: str
+    question: str = Field(min_length=1, max_length=2000)
     top_k: int = Field(default=4, ge=1, le=10)
     search_mode: SearchMode = "auto"
     user_role: str = "employee"
@@ -55,7 +55,7 @@ class FeedbackRequest(BaseModel):
 
 
 class AskRequest(BaseModel):
-    question: str
+    question: str = Field(min_length=1, max_length=2000)
     top_k: int = Field(default=4, ge=1, le=10)
     search_mode: SearchMode = "auto"
     user_role: str = "employee"
