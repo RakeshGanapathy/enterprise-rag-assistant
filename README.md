@@ -2,7 +2,7 @@
 
 ![Python](https://img.shields.io/badge/Python-3.11+-blue?logo=python) ![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-green?logo=fastapi) ![pgvector](https://img.shields.io/badge/pgvector-HNSW-blueviolet) ![LangGraph](https://img.shields.io/badge/LangGraph-stateful-orange) ![License](https://img.shields.io/badge/license-MIT-blue)
 
-A production-grade Retrieval-Augmented Generation system built with FastAPI, LangGraph, and pgvector.
+A production-grade Retrieval-Augmented Generation system built with FastAPI, LangGraph, and pgvector. Hardened for production with connection pooling, OpenAI retry, JWT-protected admin endpoints, Alembic migrations, BM25 corpus caching, correlation ID tracing, and CI/CD.
 
 ---
 
@@ -51,12 +51,17 @@ Client
 | API | FastAPI + Uvicorn |
 | Workflow | LangGraph (stateful graph) |
 | Vector DB | pgvector (HNSW index, JSONB metadata) |
-| Sparse search | rank-bm25 (BM25Okapi) |
+| Sparse search | rank-bm25 (BM25Okapi) with in-memory corpus cache |
 | Reranker | sentence-transformers cross-encoder / Cohere |
 | LLM | OpenAI-compatible (gpt-4o-mini default) |
 | Embeddings | text-embedding-3-small (1536 dims) |
 | Auth | JWT (python-jose) — domain + actions claims |
-| Tracing | Langfuse |
+| DB pool | psycopg-pool (min=2, max=10) |
+| Retry | tenacity exponential backoff (OpenAI calls) |
+| Migrations | Alembic |
+| HTTP client | httpx (S3 presigned URL downloads) |
+| Tracing | Langfuse + correlation ID middleware |
+| CI | GitHub Actions + pytest-cov |
 | Evaluation | RAGAS |
 
 ---
@@ -73,7 +78,7 @@ Client
 5. Cross-Encoder      — reranks candidate pool, returns top_k
 ```
 
-BM25 and dense vector calls run in parallel via `ThreadPoolExecutor`.
+BM25 runs against an in-memory corpus cache — no full table scan on warm requests. Cache is invalidated automatically when documents are indexed or deleted. Dense vector search runs in parallel via `ThreadPoolExecutor`.
 
 ### LangGraph Workflow
 
@@ -225,24 +230,39 @@ Edit `.env` — minimum required:
 ```env
 OPENAI_API_KEY=sk-...
 POSTGRES_URL=postgresql://rag:rag@localhost:5433/rag
+JWT_SECRET=your-secret-key-at-least-32-chars-long
 ```
 
 Full `.env.example` documents all options.
 
-### 5. Start the API
+### 5. Run database migrations
+
+```bash
+alembic upgrade head
+```
+
+This creates all 7 tables (`chunks`, `documents`, `ingest_jobs`, `conversations`, `query_cache`, `user_feedback`, `rate_limit_counters`) with correct indexes. Run this on every deployment after pulling new migrations.
+
+### 6. Start the API
 
 ```bash
 uvicorn app.main:app --reload --port 8000
 ```
 
 On startup the API:
+- Validates production secrets (`JWT_SECRET`, `OPENAI_API_KEY`)
+- Initialises the DB connection pool (min=2, max=10)
+- Checks embedding dimension consistency against stored vectors
+- Reaps any jobs stuck in `processing` from a previous crash
 - Runs `sync_directory("data/sample_docs")` to index any new/changed documents
 - Starts a background sync task (every 5 minutes by default)
 
-### 6. Ingest sample documents
+### 7. Ingest sample documents
 
 ```bash
-curl -X POST http://localhost:8000/documents/ingest-samples
+# Requires a valid JWT — generate one first (see Auth section below)
+curl -X POST http://localhost:8000/documents/ingest-samples \
+  -H "Authorization: Bearer $TOKEN"
 ```
 
 ---
@@ -275,23 +295,23 @@ print(token)
 
 | Method | Path | Auth | Description |
 |---|---|---|---|
-| GET | `/health` | No | Health check |
-| POST | `/documents/ingest-samples` | No | Index sample docs folder |
-| POST | `/documents/upload` | No | Upload a file (async job) |
+| GET | `/health` | No | Deep health check (DB probe) |
+| POST | `/documents/ingest-samples` | JWT | Index sample docs folder |
+| POST | `/documents/upload` | JWT | Upload a file (async job) — 50MB max, allowlisted types |
 | GET | `/documents/status/{job_id}` | No | Poll async job |
-| POST | `/documents/sync` | No | Scan folder for changes |
+| POST | `/documents/sync` | JWT | Scan folder for changes |
 | POST | `/documents/ingest-s3` | No | S3 event trigger (Lambda) |
 | GET | `/documents` | No | List indexed documents |
 | POST | `/search` | JWT + rate limit | Retrieval only |
 | POST | `/ask` | JWT + rate limit | Full RAG answer |
 | POST | `/ask/stream` | JWT + rate limit | Streaming SSE answer |
 | POST | `/feedback` | JWT | Submit rating |
-| GET | `/feedback/summary` | No | Aggregate stats |
-| GET | `/feedback/triage` | No | Negative feedback list |
-| GET | `/conversations/{id}` | No | Conversation history |
-| GET | `/cache/stats` | No | Cache hit counts |
-| DELETE | `/cache` | No | Flush cache |
-| GET | `/debug/chunks` | No | Inspect stored chunks |
+| GET | `/feedback/summary` | JWT | Aggregate stats |
+| GET | `/feedback/triage` | JWT | Negative feedback list (max 500 rows) |
+| GET | `/conversations/{id}` | JWT (owner only) | Conversation history |
+| GET | `/cache/stats` | JWT | Cache hit counts |
+| DELETE | `/cache` | JWT | Flush cache |
+| GET | `/debug/chunks` | JWT (local/dev only) | Inspect stored chunks |
 
 ### POST /ask
 
@@ -366,20 +386,27 @@ Compare semantic vs hybrid on 12 golden questions. Reports saved to `tests/eval_
 ### Manual smoke test
 
 ```bash
-# 1. Health check
+# 1. Health check (no auth required)
 curl http://localhost:8000/health
+# → {"status": "ok", "db": "ok", "env": "local", "app": "..."}
 
-# 2. Ingest
-curl -X POST http://localhost:8000/documents/ingest-samples
-
-# 3. List documents
-curl http://localhost:8000/documents
-
-# 4. Generate token (Python)
-python -c "
+# 2. Generate a test token
+export TOKEN=$(python -c "
 from jose import jwt; import time
-print(jwt.encode({'sub':'test@co.com','domain':'hr','actions':['read:public','read:internal','read:confidential'],'exp':int(time.time())+3600},'change-me-in-production',algorithm='HS256'))
-"
+print(jwt.encode({
+  'sub': 'test@co.com',
+  'domain': 'hr',
+  'actions': ['read:public', 'read:internal', 'read:confidential'],
+  'exp': int(time.time()) + 3600,
+}, 'change-me-in-production', algorithm='HS256'))
+")
+
+# 3. Ingest sample documents (requires auth)
+curl -X POST http://localhost:8000/documents/ingest-samples \
+  -H "Authorization: Bearer $TOKEN"
+
+# 4. List indexed documents
+curl http://localhost:8000/documents
 
 # 5. Ask a question
 curl -X POST http://localhost:8000/ask \
@@ -387,16 +414,17 @@ curl -X POST http://localhost:8000/ask \
   -H "Content-Type: application/json" \
   -d '{"question": "How many PTO days do employees get?"}'
 
-# 6. Check cache stats
-curl http://localhost:8000/cache/stats
+# 6. Check cache stats (requires auth)
+curl http://localhost:8000/cache/stats \
+  -H "Authorization: Bearer $TOKEN"
 
-# 7. Ask same question again (should be cache hit)
+# 7. Ask same question again (should be cache hit — no LLM call)
 curl -X POST http://localhost:8000/ask \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"question": "How many PTO days do employees get?"}'
 
-# 8. Multi-turn follow-up
+# 8. Multi-turn follow-up (send conversation_id from step 5)
 curl -X POST http://localhost:8000/ask \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
@@ -408,6 +436,61 @@ curl -X POST http://localhost:8000/ask \
 ```bash
 pytest tests/ -v
 ```
+
+---
+
+## Production Hardening
+
+### Connection Pool
+
+All database access goes through a shared `psycopg_pool.ConnectionPool` (min=2, max=10) initialised at startup. No per-request connections — eliminates PostgreSQL connection limit exhaustion under load.
+
+### OpenAI Retry
+
+All embedding and LLM calls are wrapped with `tenacity` exponential backoff — 3 attempts, 1–10 second wait. Transient rate limits and 500 errors are retried automatically without failing the request.
+
+### Startup Safety Checks
+
+Before accepting any traffic, the API validates:
+- `JWT_SECRET` is not the default insecure value and is at least 32 characters (non-local envs)
+- `OPENAI_API_KEY` is set (non-local envs)
+- Stored embedding dimensions match `EMBEDDING_DIMENSIONS` setting — catches model switches that would produce garbage similarity scores
+
+### Database Migrations (Alembic)
+
+Schema is managed with Alembic. All 7 tables are defined in versioned migrations under `alembic/versions/`.
+
+```bash
+alembic upgrade head      # apply all migrations
+alembic current           # check current version
+alembic downgrade -1      # roll back one migration
+```
+
+Never run `CREATE TABLE` manually — always add a new migration file.
+
+### BM25 Corpus Cache
+
+The BM25 corpus (all chunk texts) is cached in memory after the first hybrid search. Subsequent searches skip the full table scan entirely. The cache is version-stamped and invalidated automatically on every chunk insert or delete.
+
+### Correlation IDs
+
+Every request is assigned a UUID (`X-Request-ID` header). The ID is injected into every log record so concurrent requests can be traced across log lines. Clients can supply their own ID in the request header and it will be echoed back.
+
+```
+2026-06-27 14:23:01 a3f8b2c1-... app.retrieval.qa INFO Rewriting query...
+2026-06-27 14:23:01 a3f8b2c1-... app.graph.nodes  INFO Grounding check passed
+```
+
+### Stuck Job Recovery
+
+On startup, `reap_stuck_jobs()` marks any ingest job stuck in `processing` for more than 10 minutes as `failed`. Prevents jobs from being permanently stuck after a worker crash or pod eviction.
+
+### CI/CD
+
+GitHub Actions runs on every push and PR to `main`:
+- Spins up a live `pgvector/pgvector:pg16` database service
+- Runs the full test suite with `pytest --cov=app --cov-fail-under=60`
+- Fails the build if coverage drops below 60%
 
 ---
 
@@ -484,6 +567,12 @@ employee        hr, product     public      public docs only
 | `SYNC_INTERVAL_SECONDS` | `300` | Background sync interval (0=off) |
 | `LANGFUSE_PUBLIC_KEY` | — | Optional tracing |
 | `LANGFUSE_SECRET_KEY` | — | Optional tracing |
+| `OPENAI_RETRY_ATTEMPTS` | `3` | Tenacity retry count for OpenAI calls |
+| `OPENAI_RETRY_MIN_WAIT` | `1.0` | Minimum wait between retries (seconds) |
+| `OPENAI_RETRY_MAX_WAIT` | `10.0` | Maximum wait between retries (seconds) |
+| `DB_POOL_MIN_SIZE` | `2` | Min DB connections in pool |
+| `DB_POOL_MAX_SIZE` | `10` | Max DB connections in pool |
+| `APP_ENV` | `local` | `local` / `development` / `production` — gates startup assertions and debug endpoints |
 
 ---
 
@@ -491,9 +580,12 @@ employee        hr, product     public      public docs only
 
 ```
 app/
-├── main.py                  FastAPI app, all endpoints
-├── config.py                Pydantic settings
-├── middleware.py             Langfuse tracing middleware
+├── main.py                  FastAPI app, all endpoints, lifespan startup/shutdown
+├── config.py                Pydantic settings + assert_production_ready() + assert_embedding_dimensions()
+├── db.py                    psycopg_pool connection pool (init_pool / close_pool / get_conn)
+├── llm.py                   OpenAI calls with tenacity retry (embed_query / embed_texts / get_llm)
+├── correlation.py           X-Request-ID middleware + CorrelationIdFilter for logs
+├── middleware.py            Langfuse tracing middleware
 ├── access/
 │   └── rbac.py              Role policies, department/level maps
 ├── auth/
@@ -503,7 +595,7 @@ app/
 ├── cache/
 │   └── query_cache.py       Two-tier answer cache (exact + semantic)
 ├── conversation/
-│   └── store.py             pgvector-backed conversation history
+│   └── store.py             Conversation history + owner_subject column + get_owner()
 ├── evaluation/
 │   └── runner.py            RAGAS evaluation runner
 ├── feedback/
@@ -514,18 +606,29 @@ app/
 │   └── workflow.py          Graph assembly + run_rag_workflow
 ├── ingestion/
 │   ├── chunking.py          RecursiveCharacterTextSplitter (tables kept intact)
-│   ├── document_store.py    documents + ingest_jobs tables
+│   ├── document_store.py    documents + ingest_jobs + reap_stuck_jobs()
 │   ├── loaders.py           txt / md / pdf (pdfplumber) / docx loaders
 │   ├── models.py            IngestionResult, SourceDocument, TextChunk
-│   └── pipeline.py          ingest_file, sync_directory, ingest_from_s3
+│   └── pipeline.py          ingest_file, sync_directory, ingest_from_s3 (httpx)
 └── retrieval/
+    ├── bm25_cache.py        In-memory BM25 corpus cache with version invalidation
     ├── hybrid_search.py     BM25Okapi + RRF
-    ├── models.py            Pydantic request/response models
+    ├── models.py            Pydantic request/response models (Field length validation)
     ├── qa.py                answer_question, search_knowledge_base
     ├── query_router.py      Deterministic NLP classifier
     ├── reranker.py          CrossEncoder / Cohere / none
     ├── streaming.py         SSE async generator
-    └── vector_store.py      pgvector CRUD + RBAC filtering
+    └── vector_store.py      pgvector CRUD + RBAC filtering + bump_corpus_version()
+
+alembic/
+├── env.py                   Alembic config (reads POSTGRES_URL from settings)
+└── versions/
+    ├── 0001_initial_schema.py   All 7 tables + indexes
+    └── 0002_query_cache_context_hash.py  Add context_hash column
+
+.github/
+└── workflows/
+    └── ci.yml               pytest + pgvector service + 60% coverage gate
 
 lambda/
 └── s3_ingest_trigger.py     AWS Lambda — S3 event → RAG API
