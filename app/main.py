@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -5,17 +6,16 @@ from tempfile import NamedTemporaryFile
 
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
-
 from fastapi.security import HTTPBearer
 
 from app.auth.dependencies import require_auth
 from app.auth.jwt import TokenClaims, claims_to_access_filter
 from app.auth.rate_limit import require_rate_limit
 from app.config import get_settings
+from app.db import close_pool, init_pool
 from app.ingestion.pipeline import ingest_directory, ingest_from_s3, run_ingest_job, sync_directory
-from app.retrieval.models import FeedbackRequest, S3IngestRequest
 from app.middleware import LangfuseTracingMiddleware
-from app.retrieval.models import AskRequest, AskResponse, SearchRequest, SearchResponse
+from app.retrieval.models import AskRequest, AskResponse, FeedbackRequest, S3IngestRequest, SearchRequest, SearchResponse
 from app.retrieval.qa import answer_question, search_knowledge_base
 from app.retrieval.streaming import stream_rag_answer
 from app.retrieval.vector_store import list_stored_chunks
@@ -29,34 +29,31 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
-SAMPLE_DOCS_DIR = "data/sample_docs"
-SYNC_INTERVAL_SECONDS = int(settings.sync_interval_seconds)
-
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # ── startup ───────────────────────────────────────────────────────────────
-    # Sync on startup catches any changes made while the server was down.
-    # Uses mtime pre-filter so unchanged files cost nothing.
-    if settings.sync_on_startup and Path(SAMPLE_DOCS_DIR).exists():
-        logger.info("Startup sync: scanning %s for changes...", SAMPLE_DOCS_DIR)
-        result = sync_directory(SAMPLE_DOCS_DIR)
+    settings.assert_production_ready()
+
+    logger.info("Initialising DB connection pool (min=%d max=%d)...",
+                settings.db_pool_min_size, settings.db_pool_max_size)
+    init_pool()
+    logger.info("DB pool ready.")
+
+    if settings.sync_on_startup and Path(settings.sample_docs_dir).exists():
+        logger.info("Startup sync: scanning %s for changes...", settings.sample_docs_dir)
+        result = sync_directory(settings.sample_docs_dir)
         logger.info(
             "Startup sync complete: %d indexed, %d skipped",
             len(result["indexed"]),
             len(result["skipped"]),
         )
 
-    # ── background scheduled sync ─────────────────────────────────────────────
-    # Polls the folder every SYNC_INTERVAL_SECONDS.
-    # Set SYNC_INTERVAL_SECONDS=0 in .env to disable.
-    import asyncio
-
     async def _scheduled_sync():
         while True:
-            await asyncio.sleep(SYNC_INTERVAL_SECONDS)
+            await asyncio.sleep(settings.sync_interval_seconds)
             try:
-                result = sync_directory(SAMPLE_DOCS_DIR)
+                result = sync_directory(settings.sample_docs_dir)
                 if result["indexed"]:
                     logger.info(
                         "Scheduled sync: re-indexed %s",
@@ -66,15 +63,17 @@ async def lifespan(app: FastAPI):
                 logger.error("Scheduled sync error: %s", exc)
 
     task = None
-    if SYNC_INTERVAL_SECONDS > 0 and Path(SAMPLE_DOCS_DIR).exists():
+    if settings.sync_interval_seconds > 0 and Path(settings.sample_docs_dir).exists():
         task = asyncio.create_task(_scheduled_sync())
-        logger.info("Scheduled sync every %ds", SYNC_INTERVAL_SECONDS)
+        logger.info("Scheduled sync every %ds", settings.sync_interval_seconds)
 
     yield  # server runs here
 
     # ── shutdown ──────────────────────────────────────────────────────────────
     if task:
         task.cancel()
+    close_pool()
+    logger.info("DB pool closed.")
 
 
 app = FastAPI(title=settings.app_name, lifespan=lifespan)
@@ -86,8 +85,24 @@ if is_tracing_enabled():
 # ── health ────────────────────────────────────────────────────────────────────
 
 @app.get("/health")
-def health() -> dict[str, str]:
-    return {"status": "ok", "app": settings.app_name}
+def health() -> dict:
+    """Deep health check — verifies DB connectivity."""
+    from app.db import get_conn
+    try:
+        with get_conn() as conn:
+            conn.execute("SELECT 1")
+        db_status = "ok"
+    except Exception as exc:
+        logger.error("Health check DB failure: %s", exc)
+        db_status = f"error: {exc}"
+
+    status = "ok" if db_status == "ok" else "degraded"
+    return {
+        "status": status,
+        "app": settings.app_name,
+        "env": settings.app_env,
+        "db": db_status,
+    }
 
 
 # ── ingestion ─────────────────────────────────────────────────────────────────

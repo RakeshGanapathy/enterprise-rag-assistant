@@ -3,18 +3,31 @@ services:
     image: pgvector/pgvector:pg16
     container_name: rag-pgvector
     environment:
-      POSTGRES_USER: rag
-      POSTGRES_PASSWORD: rag
-      POSTGRES_DB: rag
+      POSTGRES_USER: ${POSTGRES_USER:-rag}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+      POSTGRES_DB: ${POSTGRES_DB:-rag}
     ports:
-      - "5433:5432"
+      - "${POSTGRES_PORT:-5433}:5432"
     volumes:
       - pgvector_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U rag -d rag"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-rag} -d ${POSTGRES_DB:-rag}"]
       interval: 5s
       timeout: 5s
       retries: 10
+    restart: unless-stopped
+
+  app:
+    build: .
+    container_name: rag-app
+    env_file: .env
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --timeout-graceful-shutdown 30
 
 volumes:
   pgvector_data:

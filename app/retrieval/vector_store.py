@@ -12,27 +12,14 @@ from langchain_openai import OpenAIEmbeddings
 from app.access.rbac import ACCESS_LEVELS, get_role_policy
 from app.config import get_settings
 from app.ingestion.models import TextChunk
+from app.llm import embed_query, embed_texts
 from app.retrieval.models import AccessFilter
 from app.tracing import trace_span
 
 
-# Get the OpenAIEmbeddings instance configured with the API key and model from the settings. If the API key is missing, an HTTPException is raised to inform the user to add it to the .env file before using the vector store functionality.
-def get_embeddings() -> OpenAIEmbeddings:
-    settings = get_settings()
-    if not settings.openai_api_key:
-        raise HTTPException(
-            status_code=500,
-            detail="OPENAI_API_KEY is missing. Add it to .env before indexing or asking questions.",
-        )
-
-    kwargs = {
-        "model": settings.openai_embedding_model,
-        "api_key": settings.openai_api_key,
-    }
-    if settings.openai_base_url:
-        kwargs["base_url"] = settings.openai_base_url
-
-    return OpenAIEmbeddings(**kwargs)
+def get_embeddings():
+    from app.llm import get_embeddings as _get
+    return _get()
 
 # Index a list of TextChunks by generating embeddings for their text content and storing them in the configured vector store backend (either pgvector or SQLite). The function returns the number of chunks that were indexed.
 def index_chunks(chunks: list[TextChunk]) -> int:
@@ -45,9 +32,8 @@ def index_chunks(chunks: list[TextChunk]) -> int:
         metadata={"operation": "embedding_index"},
     ) as span:
         settings = get_settings()
-        embeddings = get_embeddings()
         texts = [chunk.text for chunk in chunks]
-        vectors = embeddings.embed_documents(texts)
+        vectors = embed_texts(texts)
 
         if settings.vector_store_backend == "pgvector":
             _index_chunks_pgvector(chunks, vectors)
@@ -88,7 +74,7 @@ def hybrid_search_chunks(
     candidate_k = max(settings.reranker_top_n, top_k * 4, 20)
 
     # Step 1: embed the query — must finish before the vector DB search can start
-    query_vector = get_embeddings().embed_query(question)
+    query_vector = embed_query(question)
 
     # Step 2: semantic search and corpus load are INDEPENDENT — run both in parallel.
     #
@@ -141,7 +127,7 @@ def search_chunks(
         metadata={"operation": "vector_search"},
     ) as span:
         settings = get_settings()
-        query_vector = get_embeddings().embed_query(question)
+        query_vector = embed_query(question)
 
         if settings.vector_store_backend == "pgvector":
             results = _search_chunks_pgvector(query_vector, top_k, access_filter)
@@ -427,14 +413,9 @@ def _create_table_sqlite(connection: sqlite3.Connection) -> None:
 
 
 def _connect_pgvector():
-    from pgvector.psycopg import register_vector
-    from psycopg import connect
-
-    settings = get_settings()
-    connection = connect(settings.postgres_url, autocommit=True)
-    connection.execute("CREATE EXTENSION IF NOT EXISTS vector")
-    register_vector(connection)
-    return connection
+    """Return a pooled connection context manager."""
+    from app.db import get_conn
+    return get_conn()
 
 
 def _create_table_pgvector(connection) -> None:
